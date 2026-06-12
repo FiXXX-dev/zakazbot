@@ -1,7 +1,6 @@
-# Локальная конфигурация с ключами — не публиковать.
-# Для GitHub Pages добавьте config.js осознанно (только с публичными
-# значениями и пустым OPENAI_API_KEY): git add -f config.js
-config.js
+# config.js намеренно хранится в репозитории (нужен для GitHub Pages):
+# в нём только публичные значения — URL и anon-ключ Supabase, режим "edge".
+# НИКОГДА не коммитьте config.js с заполненным OPENAI_API_KEY (режим "direct").
 
 # Зависимости и системный мусор
 node_modules/

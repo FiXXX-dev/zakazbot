@@ -31,7 +31,7 @@ ZakazBot — MVP приёма заказов для поставщика HoReCa.
 | `js/excel.js` | `window.ExcelUtils.downloadOrderExcel(order)` — выгрузка XLSX |
 | `supabase/functions/openai-proxy/index.ts` | Edge Function — прокси к OpenAI |
 | `sql/schema.sql` | Таблицы `orders`, `clients` + RLS-политики |
-| `config.js` (в .gitignore) | Локальная конфигурация, создаётся из `config.example.js` |
+| `config.js` | Конфигурация (хранится в репозитории: только публичные значения, ключ OpenAI — никогда) |
 
 ## Критические правила
 
@@ -42,8 +42,10 @@ ZakazBot — MVP приёма заказов для поставщика HoReCa.
 
 2. **Ключ OpenAI не попадает в браузер.** `OPENAI_MODE: "edge"` по умолчанию —
    все вызовы идут через Edge Function `openai-proxy`, ключ лежит в секретах
-   Supabase. Режим `"direct"` (ключ в `config.js`) — только для локального
-   теста; `config.js` в `.gitignore`, не публиковать с ключом.
+   Supabase. `config.js` хранится в репозитории (нужен GitHub Pages) и содержит
+   только публичные значения: URL, anon-ключ Supabase, `OPENAI_API_KEY` всегда
+   пустой. Режим `"direct"` (ключ вписан в config.js) — только локальный тест,
+   такой файл НЕ коммитить.
 
 3. **Системный промпт продублирован** в `js/openai.js` (direct) и
    `supabase/functions/openai-proxy/index.ts` (edge).

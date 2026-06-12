@@ -56,14 +56,13 @@ MVP веб-приложения для менеджера поставщика H
 
 ### 2. Конфигурация фронтенда
 
-```bash
-cp config.example.js config.js
-```
+`config.js` хранится в репозитории (он нужен GitHub Pages) и содержит только
+публичные значения. Впишите в него:
 
-Заполните в `config.js`:
-
-- `SUPABASE_URL` и `SUPABASE_ANON_KEY` — Supabase → Settings → API;
-- `OPENAI_MODE: "edge"` — оставить как есть (ключ OpenAI остаётся на сервере).
+- `SUPABASE_URL` и `SUPABASE_ANON_KEY` — Supabase → Settings → API
+  (anon-ключ публичный по дизайну);
+- `OPENAI_MODE: "edge"` — оставить как есть: ключ OpenAI живёт в секретах
+  Supabase, поле `OPENAI_API_KEY` в репозитории всегда пустое.
 
 ### 3. Локальный запуск
 
@@ -76,17 +75,12 @@ npx serve .
 ### 4. Деплой на GitHub Pages
 
 1. GitHub → Settings → Pages → Deploy from a branch → ветка `main`, папка `/ (root)`.
-2. `config.js` находится в `.gitignore` (защита от утечки ключа). Для Pages
-   файл нужен в репозитории — добавьте его осознанно, предварительно убедившись,
-   что `OPENAI_MODE: "edge"` и `OPENAI_API_KEY: ""` (пустой!):
-
-   ```bash
-   git add -f config.js
-   git commit -m "config.js для GitHub Pages (без секретов)"
-   ```
+2. `config.js` уже в репозитории — перед публикацией убедитесь, что в нём
+   `OPENAI_MODE: "edge"` и `OPENAI_API_KEY: ""` (пустой!).
 
    Анонимный ключ Supabase — публичный по дизайну, его публиковать можно.
-   Ключ OpenAI публиковать нельзя никогда.
+   Ключ OpenAI публиковать нельзя никогда: для режима `direct` вписывайте его
+   только локально и не коммитьте такой файл.
 
 ## Режимы обращения к OpenAI
 
@@ -119,7 +113,7 @@ npx serve .
 ├── new-order.html          # Создание заказа
 ├── clients.html            # База клиентов
 ├── config.example.js       # Шаблон конфигурации
-├── config.js               # Локальная конфигурация (в .gitignore)
+├── config.js               # Конфигурация (в репозитории, только публичные значения)
 ├── css/
 │   └── style.css
 ├── js/

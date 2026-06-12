@@ -1,12 +1,11 @@
-// Шаблон конфигурации ZakazBot. Рабочий файл — config.js, он хранится в
-// репозитории и содержит ТОЛЬКО публичные значения (URL и anon-ключ Supabase).
-// Ключ OpenAI в config.js не вписывать — он живёт в секретах Supabase
-// (режим "edge"); для режима "direct" — только локально и не коммитить.
+// Конфигурация ZakazBot. Файл хранится в репозитории (нужен GitHub Pages) —
+// только публичные значения. OPENAI_API_KEY здесь всегда пустой; для режима
+// "direct" вписывайте ключ только локально и не коммитьте.
 
 window.CONFIG = {
   // Проект Supabase: Settings → API
-  SUPABASE_URL: "https://YOUR-PROJECT.supabase.co",
-  SUPABASE_ANON_KEY: "YOUR-ANON-KEY",
+  SUPABASE_URL: "https://srsfkuritnjjzrmjorpu.supabase.co",
+  SUPABASE_ANON_KEY: "НОВЫЙ_КЛЮЧ_ПОСЛЕ_СБРОСА", // ← замените на реальный anon-ключ: Supabase → Settings → API
 
   // Режим обращения к OpenAI:
   //   "edge"   — через Supabase Edge Function "openai-proxy" (по умолчанию).
