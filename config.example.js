@@ -14,6 +14,9 @@ window.CONFIG = {
   //   "direct" — напрямую из браузера. ТОЛЬКО для локального теста!
   OPENAI_MODE: "edge",
 
+  // Имя Edge Function-прокси (если в дашборде Supabase функция названа иначе).
+  EDGE_FUNCTION_NAME: "openai-proxy",
+
   // Заполняется ТОЛЬКО для OPENAI_MODE="direct" при локальной отладке.
   // Никогда не публикуйте файл с заполненным ключом.
   OPENAI_API_KEY: ""

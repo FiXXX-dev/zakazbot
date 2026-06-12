@@ -48,7 +48,8 @@
   }
 
   function edgeUrl() {
-    return String(cfg().SUPABASE_URL || "").replace(/\/+$/, "") + "/functions/v1/openai-proxy";
+    const fn = cfg().EDGE_FUNCTION_NAME || "openai-proxy";
+    return String(cfg().SUPABASE_URL || "").replace(/\/+$/, "") + "/functions/v1/" + fn;
   }
 
   function edgeHeaders(extra) {
