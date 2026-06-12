@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>База клиентов — ZakazBot</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <a class="brand" href="index.html">Zakaz<span>Bot</span></a>
+      <nav>
+        <a href="index.html">Заказы</a>
+        <a href="new-order.html">Новый заказ</a>
+        <a href="clients.html" class="active">Клиенты</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <h1>База клиентов</h1>
+    <div id="setup-warning"></div>
+
+    <div class="toolbar">
+      <input type="search" id="search-input" class="grow" placeholder="Поиск по названию или телефону…">
+      <button type="button" id="add-client-btn" class="btn">+ Добавить клиента</button>
+    </div>
+
+    <section class="card hidden" id="client-form">
+      <h2 style="margin-top:0" id="client-form-title">Новый клиент</h2>
+      <div class="form-row">
+        <div class="field">
+          <label for="cf-name">Название / имя *</label>
+          <input type="text" id="cf-name" placeholder="Кафе Лагман">
+        </div>
+        <div class="field">
+          <label for="cf-phone">Телефон</label>
+          <input type="tel" id="cf-phone" placeholder="+998 …">
+        </div>
+      </div>
+      <div class="field">
+        <label for="cf-notes">Заметки</label>
+        <textarea id="cf-notes" class="small" placeholder="Например: доставка до 10:00, оплата по понедельникам"></textarea>
+      </div>
+      <div class="order-actions">
+        <button type="button" id="cf-save" class="btn">Сохранить</button>
+        <button type="button" id="cf-cancel" class="btn btn-outline">Отмена</button>
+      </div>
+      <div id="cf-msg"></div>
+    </section>
+
+    <div id="clients-list"></div>
+
+    <datalist id="units-datalist">
+      <option value="шт"></option>
+      <option value="уп"></option>
+      <option value="кг"></option>
+      <option value="л"></option>
+      <option value="пар"></option>
+      <option value="рул"></option>
+      <option value="пач"></option>
+    </datalist>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+  <script src="config.js"></script>
+  <script src="js/supabase-client.js"></script>
+  <script src="js/excel.js"></script>
+  <script src="js/clients.js"></script>
+</body>
+</html>

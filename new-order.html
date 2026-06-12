@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Новый заказ — ZakazBot</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <a class="brand" href="index.html">Zakaz<span>Bot</span></a>
+      <nav>
+        <a href="index.html">Заказы</a>
+        <a href="new-order.html" class="active">Новый заказ</a>
+        <a href="clients.html">Клиенты</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <h1>Новый заказ</h1>
+    <div id="setup-warning"></div>
+
+    <section class="card">
+      <div class="tabs" id="mode-tabs">
+        <button type="button" data-mode="audio" class="active">Аудио</button>
+        <button type="button" data-mode="text">Текст</button>
+      </div>
+
+      <div id="audio-panel">
+        <div class="field">
+          <label for="audio-file">Голосовое сообщение (.ogg, .mp3, .wav, .m4a)</label>
+          <input type="file" id="audio-file"
+                 accept=".ogg,.mp3,.wav,.m4a,audio/ogg,audio/mpeg,audio/wav,audio/mp4,audio/x-m4a">
+        </div>
+      </div>
+
+      <div id="text-panel" class="hidden">
+        <div class="field">
+          <label for="order-text">Текст заказа</label>
+          <textarea id="order-text" placeholder="Например: «Это кафе Лагман. Нужно 10 упаковок салфеток, 2 коробки перчаток размер М и как обычно лепёшки»"></textarea>
+        </div>
+      </div>
+
+      <div id="transcript-block" class="hidden">
+        <div class="field"><label>Расшифровка</label></div>
+        <div id="transcript-text" class="transcript"></div>
+        <button type="button" id="edit-transcript-btn" class="btn btn-outline btn-sm">Редактировать как текст</button>
+      </div>
+
+      <div style="margin-top:14px">
+        <button type="button" id="recognize-btn" class="btn">Распознать заказ</button>
+      </div>
+      <div id="recognize-msg"></div>
+    </section>
+
+    <section class="card">
+      <h2 style="margin-top:0">Состав заказа</h2>
+      <div id="order-flags"></div>
+
+      <div class="table-wrap">
+        <table class="items-table">
+          <thead>
+            <tr>
+              <th>№</th>
+              <th>Наименование</th>
+              <th>Количество</th>
+              <th>Ед.изм.</th>
+              <th>Цена</th>
+              <th>Сумма</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="items-tbody"></tbody>
+          <tfoot>
+            <tr>
+              <td colspan="5" style="text-align:right">Итого:</td>
+              <td id="items-total">0</td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <button type="button" id="add-row-btn" class="btn btn-outline btn-sm">+ Добавить строку</button>
+
+      <div class="form-row">
+        <div class="field">
+          <label for="client-name">Клиент</label>
+          <input type="text" id="client-name" list="clients-datalist" placeholder="Название кафе / имя">
+          <datalist id="clients-datalist"></datalist>
+        </div>
+        <div class="field">
+          <label for="client-phone">Телефон</label>
+          <input type="tel" id="client-phone" placeholder="+998 …">
+        </div>
+      </div>
+
+      <div class="order-actions">
+        <button type="button" id="excel-btn" class="btn btn-outline">Скачать Excel</button>
+        <button type="button" id="save-btn" class="btn">Сохранить заказ</button>
+      </div>
+      <div id="save-msg"></div>
+    </section>
+
+    <datalist id="units-datalist">
+      <option value="шт"></option>
+      <option value="уп"></option>
+      <option value="кг"></option>
+      <option value="л"></option>
+      <option value="пар"></option>
+      <option value="рул"></option>
+      <option value="пач"></option>
+    </datalist>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+  <script src="config.js"></script>
+  <script src="js/supabase-client.js"></script>
+  <script src="js/openai.js"></script>
+  <script src="js/excel.js"></script>
+  <script src="js/new-order.js"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+# Локальная конфигурация с ключами — не публиковать.
+# Для GitHub Pages добавьте config.js осознанно (только с публичными
+# значениями и пустым OPENAI_API_KEY): git add -f config.js
+config.js
+
+# Зависимости и системный мусор
+node_modules/
+.DS_Store
+*.log
+
+# Supabase CLI
+supabase/.temp/
+supabase/.branches/
+.env
+.env.*
