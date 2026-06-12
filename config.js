@@ -12,7 +12,7 @@ window.CONFIG = {
   //              Ключ OpenAI хранится в секретах Supabase и НЕ попадает в браузер.
   //   "direct" — напрямую из браузера. ТОЛЬКО для локального теста!
   OPENAI_MODE: "edge",
-
+EDGE_FUNCTION_NAME: "openaiproxy",
   // Заполняется ТОЛЬКО для OPENAI_MODE="direct" при локальной отладке.
   // Никогда не публикуйте файл с заполненным ключом.
   OPENAI_API_KEY: ""
