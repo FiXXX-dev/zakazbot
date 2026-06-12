@@ -5,7 +5,7 @@
 window.CONFIG = {
   // Проект Supabase: Settings → API
   SUPABASE_URL: "https://srsfkuritnjjzrmjorpu.supabase.co",
-  SUPABASE_ANON_KEY: "НОВЫЙ_КЛЮЧ_ПОСЛЕ_СБРОСА", // ← замените на реальный anon-ключ: Supabase → Settings → API
+  SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNyc2ZrdXJpdG5qanpybWpvcnB1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyOTI0MTQsImV4cCI6MjA5Njg2ODQxNH0.Q9FM4vjTvoGjpKz_-ujU7pYUJFRPhdKC7X5FEgG55Xg", // ← замените на реальный anon-ключ: Supabase → Settings → API
 
   // Режим обращения к OpenAI:
   //   "edge"   — через Supabase Edge Function "openai-proxy" (по умолчанию).
