@@ -66,11 +66,28 @@
     return key;
   }
 
+  // Запрос к Edge Function с пометкой источника ошибки: серверные ошибки
+  // (код функции в дашборде, секреты, OpenAI) не путаются с ошибками фронтенда.
+  async function edgeRequest(options) {
+    const fnName = cfg().EDGE_FUNCTION_NAME || "openai-proxy";
+    let resp;
+    try {
+      resp = await fetch(edgeUrl(), options);
+    } catch (e) {
+      throw new Error("Edge Function «" + fnName + "» недоступна: " + (e && e.message ? e.message : e));
+    }
+    try {
+      return await readJson(resp);
+    } catch (e) {
+      throw new Error("Edge Function «" + fnName + "» вернула ошибку: " + (e && e.message ? e.message : e));
+    }
+  }
+
   async function readJson(resp) {
     let data = null;
     try { data = await resp.json(); } catch (e) { /* не-JSON ответ */ }
     if (!resp.ok) {
-      const msg = (data && (data.error && data.error.message || data.error)) || ("HTTP " + resp.status);
+      const msg = (data && (data.error && data.error.message || data.error || data.message)) || ("HTTP " + resp.status);
       throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
     }
     return data || {};
@@ -101,12 +118,11 @@
       return data.text || "";
     }
 
-    const resp = await fetch(edgeUrl(), {
+    const data = await edgeRequest({
       method: "POST",
       headers: edgeHeaders(),
       body: fd
     });
-    const data = await readJson(resp);
     return data.text || "";
   }
 
@@ -136,12 +152,11 @@
       return safeJsonParse(content);
     }
 
-    const resp = await fetch(edgeUrl(), {
+    const data = await edgeRequest({
       method: "POST",
       headers: edgeHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ action: "parse", text: text })
     });
-    const data = await readJson(resp);
     if (data.result) return data.result;
     throw new Error("Edge Function не вернула результат разбора.");
   }
