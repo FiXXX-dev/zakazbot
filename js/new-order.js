@@ -110,40 +110,45 @@
     }) || null;
   }
 
-  // Нечёткий поиск клиента: точное совпадение в кэше → ilike по полному имени →
-  // ilike по отдельным словам длиннее 3 символов. Регистронезависимо.
-  // Пример: «навруз» → находит «Ресторан Навруз».
-  async function findClientFuzzy(name) {
-    const q = String(name || "").trim();
-    if (!q) return null;
+  // Загружает стандартный заказ клиента по имени от GPT и подставляет телефон/имя.
+  // Имя часто неполное («навруз» → «Ресторан Навруз»), поэтому ищем регистро-
+  // независимо (ilike): сначала по всему имени, затем по каждому слову длиннее
+  // 2 символов. Возвращает массив позиций стандартного заказа (клиент найден,
+  // заказ может быть пустым) либо null (клиент в базе не найден).
+  async function loadStandardOrder(name) {
+    if (!name || !window.sb) return null;
 
-    const exact = findClient(q);
-    if (exact) return exact;
-    if (!window.sb) return null;
+    // Сначала — поиск по имени целиком.
+    let { data } = await window.sb.from("clients")
+      .select("name, phone, standard_order")
+      .ilike("name", likeContains(name))
+      .limit(1);
 
-    let found = await findClientIlike(q);
-    if (found) return found;
-
-    const words = q.split(/\s+/);
-    for (const word of words) {
-      if (word.length > 3) { // игнорируем короткие слова («ИП», предлоги и т.п.)
-        found = await findClientIlike(word);
-        if (found) return found;
+    // Не нашли — пробуем каждое слово отдельно (короткие слова игнорируем).
+    if (!data || !data.length) {
+      const words = name.split(/\s+/).filter(function (w) { return w.length > 2; });
+      for (const word of words) {
+        const res = await window.sb.from("clients")
+          .select("name, phone, standard_order")
+          .ilike("name", likeContains(word))
+          .limit(1);
+        if (res.data && res.data.length) { data = res.data; break; }
       }
     }
-    return null;
+
+    if (!data || !data.length) return null;
+
+    const client = data[0];
+    // Автоподстановка: телефон (если поле пустое) и каноническое имя из базы —
+    // по нему заказ свяжется с историей клиента.
+    if (client.phone && !els.clientPhone.value.trim()) els.clientPhone.value = client.phone;
+    els.clientName.value = client.name;
+    return Array.isArray(client.standard_order) ? client.standard_order : [];
   }
 
-  async function findClientIlike(fragment) {
-    const pattern = "%" + String(fragment).replace(/([%_\\])/g, "\\$1") + "%";
-    const { data, error } = await window.sb
-      .from("clients")
-      .select("*")
-      .ilike("name", pattern)
-      .order("name", { ascending: true })
-      .limit(1);
-    if (error || !data || !data.length) return null;
-    return data[0];
+  // Экранирует спецсимволы LIKE (% _ \) и оборачивает в %…% (поиск подстроки).
+  function likeContains(fragment) {
+    return "%" + String(fragment).replace(/([%_\\])/g, "\\$1") + "%";
   }
 
   function autofillPhone() {
@@ -211,19 +216,15 @@
     let newItems = (Array.isArray(parsed.items) ? parsed.items : []).map(normalizeItem);
     const flagsHtml = [];
 
-    let nameAutoFilled = false;
     if (parsed.client_name && !els.clientName.value.trim()) {
       els.clientName.value = String(parsed.client_name);
-      nameAutoFilled = true;
     }
 
-    // Нечёткий поиск клиента в базе («навруз» → «Ресторан Навруз»).
-    const client = await findClientFuzzy(els.clientName.value);
-    if (client) {
-      // Каноническое имя из базы: по нему связывается история заказов.
-      if (nameAutoFilled) els.clientName.value = client.name;
-      if (client.phone && !els.clientPhone.value.trim()) els.clientPhone.value = client.phone;
-    }
+    // Нечёткий поиск клиента в базе + автоподстановка телефона и имени.
+    // standardOrder: массив позиций (клиент найден) либо null (не найден).
+    const standardOrder = await loadStandardOrder(els.clientName.value);
+    const found = standardOrder !== null;
+    const clientName = els.clientName.value.trim();
 
     if (parsed.urgent) {
       flagsHtml.push('<span class="badge badge-urgent">Срочный заказ</span>');
@@ -234,16 +235,15 @@
 
     // «Как обычно» — подставляем стандартный заказ клиента из базы.
     if (parsed.repeat_last_order) {
-      const std = client && Array.isArray(client.standard_order) ? client.standard_order : [];
-      if (std.length) {
-        const stdItems = std.map(function (it) {
+      if (found && standardOrder.length) {
+        const stdItems = standardOrder.map(function (it) {
           return normalizeItem(Object.assign({}, it, { confidence: "high", note: "" }));
         });
         newItems = stdItems.concat(newItems);
         flagsHtml.push('<div class="msg msg-info">Клиент просит «как обычно» — подставлен стандартный заказ клиента «' +
-          esc(client.name) + "».</div>");
-      } else if (client) {
-        flagsHtml.push('<div class="msg msg-warn">Клиент «' + esc(client.name) +
+          esc(clientName) + "».</div>");
+      } else if (found) {
+        flagsHtml.push('<div class="msg msg-warn">Клиент «' + esc(clientName) +
           '» найден, но стандартный заказ у него не задан — задайте его на странице «Клиенты».</div>');
       } else {
         flagsHtml.push('<div class="msg msg-warn">Клиент просит «как обычно», но клиент в базе не найден. ' +
