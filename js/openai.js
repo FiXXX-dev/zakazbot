@@ -1,12 +1,12 @@
 // Распознавание заказов: Whisper (аудио → текст) + GPT-4o-mini (текст → позиции).
 //
 // Режимы (window.CONFIG.OPENAI_MODE):
-//   "edge"   — запросы идут на Supabase Edge Function "openai-proxy",
+//   "edge"   — запросы идут на Supabase Edge Function "openaiproxy",
 //              ключ OpenAI хранится в секретах Supabase и НЕ попадает в браузер.
 //   "direct" — запросы напрямую на api.openai.com с ключом из config.js.
 //              ТОЛЬКО для локального теста.
 //
-// Системный промпт продублирован в supabase/functions/openai-proxy/index.ts —
+// Системный промпт продублирован в supabase/functions/openaiproxy/index.ts —
 // изменения вносить в оба файла синхронно.
 
 (function () {
@@ -55,7 +55,7 @@
   }
 
   function edgeUrl() {
-    const fn = cfg().EDGE_FUNCTION_NAME || "openai-proxy";
+    const fn = cfg().EDGE_FUNCTION_NAME || "openaiproxy";
     return String(cfg().SUPABASE_URL || "").replace(/\/+$/, "") + "/functions/v1/" + fn;
   }
 
@@ -76,7 +76,7 @@
   // Запрос к Edge Function с пометкой источника ошибки: серверные ошибки
   // (код функции в дашборде, секреты, OpenAI) не путаются с ошибками фронтенда.
   async function edgeRequest(options) {
-    const fnName = cfg().EDGE_FUNCTION_NAME || "openai-proxy";
+    const fnName = cfg().EDGE_FUNCTION_NAME || "openaiproxy";
     let resp;
     try {
       resp = await fetch(edgeUrl(), options);

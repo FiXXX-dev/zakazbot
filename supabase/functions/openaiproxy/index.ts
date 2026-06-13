@@ -1,8 +1,8 @@
-// Supabase Edge Function: openai-proxy
+// Supabase Edge Function: openaiproxy
 //
 // Прокси к OpenAI: ключ хранится в секретах Supabase и НЕ попадает в браузер.
 //
-// Деплой:  supabase functions deploy openai-proxy
+// Деплой:  supabase functions deploy openaiproxy
 // Секрет:  supabase secrets set OPENAI_API_KEY=sk-...
 //
 // Запросы:
