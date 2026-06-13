@@ -18,7 +18,7 @@ GPT-4o-mini выделяет позиции → менеджер правит т
 - Локальный сервер: `npx serve .` (подойдёт любой статический сервер)
 - Сборки, тестов и линтера нет — проверять страницы в браузере
 - Схема БД: выполнить `sql/schema.sql` в SQL Editor Supabase
-- Edge Function: `supabase functions deploy openai-proxy`,
+- Edge Function: `supabase functions deploy openaiproxy`,
   ключ: `supabase secrets set OPENAI_API_KEY=sk-...`
 
 ## Структура
@@ -34,7 +34,7 @@ GPT-4o-mini выделяет позиции → менеджер правит т
 | `js/normalize.js` | `window.Normalizer.normalizeTranscript()` — этап между Whisper и GPT |
 | `js/openai.js` | Whisper + GPT-4o-mini, режимы edge/direct, системный промпт |
 | `js/excel.js` | `window.ExcelUtils.downloadOrderExcel(order)` — выгрузка XLSX |
-| `supabase/functions/openai-proxy/index.ts` | Edge Function — прокси к OpenAI |
+| `supabase/functions/openaiproxy/index.ts` | Edge Function — прокси к OpenAI |
 | `sql/schema.sql` | Таблицы `orders`, `clients`, `products`, `order_logs` + бакет `order-audio` + RLS |
 | `config.js` | Конфигурация (хранится в репозитории: только публичные значения, ключ OpenAI — никогда) |
 
@@ -46,14 +46,14 @@ GPT-4o-mini выделяет позиции → менеджер правит т
    Никогда не писать `window.supabase.from(...)`.
 
 2. **Ключ OpenAI не попадает в браузер.** `OPENAI_MODE: "edge"` по умолчанию —
-   все вызовы идут через Edge Function `openai-proxy`, ключ лежит в секретах
+   все вызовы идут через Edge Function `openaiproxy`, ключ лежит в секретах
    Supabase. `config.js` хранится в репозитории (нужен GitHub Pages) и содержит
    только публичные значения: URL, anon-ключ Supabase, `OPENAI_API_KEY` всегда
    пустой. Режим `"direct"` (ключ вписан в config.js) — только локальный тест,
    такой файл НЕ коммитить.
 
 3. **Системный промпт продублирован** в `js/openai.js` (direct) и
-   `supabase/functions/openai-proxy/index.ts` (edge).
+   `supabase/functions/openaiproxy/index.ts` (edge).
    Любые изменения промпта вносить в ОБА файла синхронно.
 
 4. **Таблица позиций (new-order) не перерисовывается при вводе.**
