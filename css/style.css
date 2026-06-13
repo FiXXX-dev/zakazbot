@@ -234,6 +234,8 @@ tr.row-warn td {
   border-color: var(--warn-border);
 }
 .item-note { font-size: 12px; color: var(--warn-text); margin-top: 2px; }
+.item-confidence { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.item-confidence.warn { color: var(--warn-text); font-weight: 500; }
 
 .row-del {
   border: none;
@@ -274,6 +276,18 @@ tr.row-warn td {
   font-size: 14px;
   margin-bottom: 8px;
   white-space: pre-wrap;
+}
+
+/* Список применённых нормализацией замен (под нормализованным текстом) */
+.corrections { font-size: 13px; margin: -2px 0 8px; }
+.corrections .corr-line { color: var(--muted); margin-top: 4px; }
+.corrections .corr-line b { color: var(--text); }
+.corrections .corr-warn {
+  color: var(--warn-text);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: 6px;
+  padding: 6px 10px;
 }
 
 /* ── Сообщения ─────────────────────────────────────────── */
