@@ -59,7 +59,7 @@ MVP веб-приложения для менеджера поставщика H
    supabase login
    supabase link --project-ref <PROJECT_REF>
    supabase secrets set OPENAI_API_KEY=sk-...
-   supabase functions deploy openai-proxy
+   supabase functions deploy openaiproxy
    ```
 
 ### 2. Конфигурация фронтенда
@@ -116,7 +116,7 @@ npx serve .
 правки кода — только данными в `js/dictionary.js`.
 
 **Системный промпт** (продублирован в `js/openai.js` и
-`supabase/functions/openai-proxy/index.ts`) возвращает строгий JSON: клиент,
+`supabase/functions/openaiproxy/index.ts`) возвращает строгий JSON: клиент,
 комментарий, флаги `urgent` / `repeat_last_order` и список позиций с
 `confidence`, `confidence_score` (0–100) и `corrected`. Промпт инструктирует
 GPT при самоисправлении брать **последнее** значение, а при повторе товара —
@@ -165,7 +165,7 @@ juft=пар, qop=мешок, korobka=коробка, upakovka=упаковка).
 │   └── admin.js            # Логика admin.html (импорт .csv/.xlsx)
 ├── sql/
 │   └── schema.sql          # Таблицы (+ order_logs) + бакет order-audio + RLS
-├── supabase/functions/openai-proxy/
+├── supabase/functions/openaiproxy/
 │   └── index.ts            # Edge Function — прокси к OpenAI
 ├── CLAUDE.md
 └── README.md

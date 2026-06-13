@@ -1,8 +1,8 @@
-// Supabase Edge Function: openai-proxy
+// Supabase Edge Function: openaiproxy
 //
 // Прокси к OpenAI: ключ хранится в секретах Supabase и НЕ попадает в браузер.
 //
-// Деплой:  supabase functions deploy openai-proxy
+// Деплой:  supabase functions deploy openaiproxy
 // Секрет:  supabase secrets set OPENAI_API_KEY=sk-...
 //
 // Запросы:
@@ -36,7 +36,7 @@ const SYSTEM_PROMPT = `Ты — система распознавания зак
 Правила:
 - Название заведения (кафе, ресторан, магазин и т.д.) или имя клиента рядом со словом «это» — это client_name, а НЕ товар.
 - В items только то, что заказывают: продукты, упаковка, посуда и т.д. Не добавляй в items название заведения или имя клиента.
-- САМОИСПРАВЛЕНИЯ. Если клиент сначала назвал одно количество или товар, а затем исправил себя словами «yo'q», «йук», «нет», «net», «ne», «eee», «ээ», «ya'ni», «aniqrog'i», «to'g'risi» — используй ПОСЛЕДНЕЕ (исправленное) значение, а не первое. Для такой позиции ставь "corrected": true.
+- САМОИСПРАВЛЕНИЯ И УТОЧНЕНИЯ. Клиент часто называет одно число, потом говорит «ээ», «нет», «йук», «yo'q», «ne», «ya'ni» и называет другое число — это значит он ИСПРАВЛЯЕТ себя. Всегда бери ПОСЛЕДНЕЕ названное число, не первое. Пример: «2 штуки... ээ нет 200 штук» → qty=200. Пример: «вилок столько же» → то же количество что у предыдущего товара. Для таких позиций ставь corrected=true.
 - ПОВТОРЫ. Если один и тот же товар упомянут несколько раз — используй последнюю, уточнённую версию (количество и единицу), не дублируй позицию.
 - Узбекские единицы: dona=шт, ta=шт, juft=пар, qop=мешок, korobka=коробка, upakovka=упаковка.
 - confidence_score (0–100) — насколько уверенно распознана позиция. Понижай его, если: количество не указано, название товара неясно, было самоисправление. Согласуй: confidence="low" при score<55, "medium" при 55–79, "high" при ≥80.
@@ -105,6 +105,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const upstream = new FormData();
       upstream.append("file", file, file.name || "audio.ogg");
       upstream.append("model", "whisper-1");
+      upstream.append("prompt", "Заказ товаров на узбекском языке. Числа: ikki ta, ikki yuz ta, besh ta, o'n ta, yigirma ta, ellik ta, yuz ta, ming ta, ikki ming ta. Товары: plastik stakan, plastik vilka, qoshiq, idish, paket, qop, korobka. Самоисправления: yo'q, yo'q yo'q, emas.");
+      upstream.append("language", "uz");
 
       const resp = await fetch(`${OPENAI_API}/audio/transcriptions`, {
         method: "POST",
