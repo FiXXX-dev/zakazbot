@@ -24,6 +24,14 @@ create table if not exists public.clients (
   notes          text
 );
 
+create table if not exists public.products (
+  id         uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  name       text not null,
+  unit       text,
+  price      numeric
+);
+
 -- Элемент items / standard_order (jsonb):
 -- { "name": "Салфетки", "qty": 10, "unit": "уп", "price": 12000,
 --   "confidence": "high", "note": "" }
@@ -32,11 +40,13 @@ create index if not exists orders_created_at_idx on public.orders (created_at de
 create index if not exists orders_status_idx     on public.orders (status);
 create index if not exists orders_client_idx     on public.orders (client_name);
 create index if not exists clients_name_idx      on public.clients (name);
+create index if not exists products_name_idx     on public.products (name);
 
 -- ─── RLS ────────────────────────────────────────────────────────────
 
-alter table public.orders  enable row level security;
-alter table public.clients enable row level security;
+alter table public.orders   enable row level security;
+alter table public.clients  enable row level security;
+alter table public.products enable row level security;
 
 -- MVP: открытый доступ для анонимного ключа (anon).
 -- ВНИМАНИЕ: любой, у кого есть anon-ключ, может читать и менять данные.
@@ -48,14 +58,21 @@ create policy "orders anon full access" on public.orders
 create policy "clients anon full access" on public.clients
   for all to anon using (true) with check (true);
 
+create policy "products anon full access" on public.products
+  for all to anon using (true) with check (true);
+
 -- ─── Продакшен-вариант: только авторизованные пользователи ──────────
 -- Включите Supabase Auth, затем выполните:
 --
--- drop policy if exists "orders anon full access" on public.orders;
--- drop policy if exists "clients anon full access" on public.clients;
+-- drop policy if exists "orders anon full access"   on public.orders;
+-- drop policy if exists "clients anon full access"  on public.clients;
+-- drop policy if exists "products anon full access" on public.products;
 --
 -- create policy "orders authenticated full access" on public.orders
 --   for all to authenticated using (true) with check (true);
 --
 -- create policy "clients authenticated full access" on public.clients
+--   for all to authenticated using (true) with check (true);
+--
+-- create policy "products authenticated full access" on public.products
 --   for all to authenticated using (true) with check (true);

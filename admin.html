@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Админ — ZakazBot</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <a class="brand" href="index.html">Zakaz<span>Bot</span></a>
+      <nav>
+        <a href="index.html">Заказы</a>
+        <a href="new-order.html">Новый заказ</a>
+        <a href="clients.html">Клиенты</a>
+        <a href="admin.html" class="active">Админ</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <h1>Панель администратора</h1>
+    <div id="setup-warning"></div>
+
+    <section class="card">
+      <h2 style="margin-top:0">Импорт товаров</h2>
+      <p class="client-sub">
+        Файл <strong>.csv</strong> или <strong>.xlsx</strong> с колонками в первой строке:
+        <code>Наименование</code>, <code>Единица</code>, <code>Цена</code>.
+        Обязательна только колонка «Наименование». Сохраняется в таблицу <code>products</code>.
+        Для CSV используйте кодировку UTF-8.
+      </p>
+      <div class="form-row">
+        <div class="field">
+          <label for="products-file">Файл товаров</label>
+          <input type="file" id="products-file"
+                 accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv">
+        </div>
+      </div>
+      <button type="button" id="products-btn" class="btn">Загрузить товары</button>
+      <div id="products-msg"></div>
+    </section>
+
+    <section class="card">
+      <h2 style="margin-top:0">Импорт клиентов</h2>
+      <p class="client-sub">
+        Файл <strong>.csv</strong> или <strong>.xlsx</strong> с колонками в первой строке:
+        <code>Имя</code>, <code>Телефон</code>. Обязательна только колонка «Имя».
+        Сохраняется в таблицу <code>clients</code>; клиенты с уже существующим именем пропускаются.
+        Для CSV используйте кодировку UTF-8.
+      </p>
+      <div class="form-row">
+        <div class="field">
+          <label for="clients-file">Файл клиентов</label>
+          <input type="file" id="clients-file"
+                 accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv">
+        </div>
+      </div>
+      <button type="button" id="clients-btn" class="btn">Загрузить клиентов</button>
+      <div id="clients-msg"></div>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+  <script src="config.js"></script>
+  <script src="js/supabase-client.js"></script>
+  <script src="js/admin.js"></script>
+</body>
+</html>

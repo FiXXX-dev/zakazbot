@@ -26,6 +26,7 @@ ZakazBot — MVP приёма заказов для поставщика HoReCa.
 | `index.html` + `js/orders.js` | Входящие заказы: поиск, фильтры (статус, сегодня/всё время), смена статуса, Excel, удаление |
 | `new-order.html` + `js/new-order.js` | Распознавание аудио/текста, редактируемая таблица позиций, Excel, сохранение |
 | `clients.html` + `js/clients.js` | Клиенты: поиск, история заказов, стандартный заказ («как обычно») |
+| `admin.html` + `js/admin.js` | Админ: импорт товаров и клиентов из .csv/.xlsx (SheetJS) в `products` / `clients` |
 | `js/supabase-client.js` | Создаёт `window.sb` (клиент Supabase) |
 | `js/openai.js` | Whisper + GPT-4o-mini, режимы edge/direct, системный промпт |
 | `js/excel.js` | `window.ExcelUtils.downloadOrderExcel(order)` — выгрузка XLSX |
@@ -64,9 +65,10 @@ ZakazBot — MVP приёма заказов для поставщика HoReCa.
 ## Данные
 
 ```
-orders:  id uuid, created_at, client_name, client_phone,
-         status ('new'|'processing'|'ready'), items jsonb, source_text, excel_url
-clients: id uuid, created_at, name, phone, standard_order jsonb, notes
+orders:   id uuid, created_at, client_name, client_phone,
+          status ('new'|'processing'|'ready'), items jsonb, source_text, excel_url
+clients:  id uuid, created_at, name, phone, standard_order jsonb, notes
+products: id uuid, created_at, name, unit, price   (справочник, импорт из admin.html)
 ```
 
 Элемент `items` / `standard_order`:
