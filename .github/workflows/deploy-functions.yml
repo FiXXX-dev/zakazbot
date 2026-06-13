@@ -1,0 +1,36 @@
+name: Deploy Supabase Edge Functions
+
+# Автодеплой Edge Functions в Supabase при push в main.
+#
+# Требуются секреты репозитория (Settings → Secrets and variables → Actions):
+#   SUPABASE_ACCESS_TOKEN — токен доступа (Supabase Dashboard → Account → Access Tokens)
+#   SUPABASE_PROJECT_ID   — Reference ID проекта (Settings → General → Reference ID)
+
+on:
+  push:
+    branches: [main]
+    # Деплоим только когда меняются сами функции или этот workflow,
+    # чтобы не дёргать прод на каждый коммит в main. Убрать paths — будет
+    # деплоить на любой push в main.
+    paths:
+      - "supabase/functions/**"
+      - ".github/workflows/deploy-functions.yml"
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Deploy all Edge Functions
+        run: supabase functions deploy --project-ref "$SUPABASE_PROJECT_ID" --no-verify-jwt
