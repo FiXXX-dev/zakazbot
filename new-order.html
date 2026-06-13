@@ -45,9 +45,14 @@
       </div>
 
       <div id="transcript-block" class="hidden">
-        <div class="field"><label>Расшифровка</label></div>
+        <div class="field" style="margin-bottom:4px"><label>1. Исходная расшифровка</label></div>
         <div id="transcript-text" class="transcript"></div>
-        <button type="button" id="edit-transcript-btn" class="btn btn-outline btn-sm">Редактировать как текст</button>
+
+        <div class="field" style="margin:10px 0 4px"><label>2. Нормализованный текст (отправляется на разбор)</label></div>
+        <div id="normalized-text" class="transcript"></div>
+        <div id="corrections-list" class="corrections hidden"></div>
+
+        <button type="button" id="edit-transcript-btn" class="btn btn-outline btn-sm" style="margin-top:8px">Редактировать как текст</button>
       </div>
 
       <div style="margin-top:14px">
@@ -57,7 +62,7 @@
     </section>
 
     <section class="card">
-      <h2 style="margin-top:0">Состав заказа</h2>
+      <h2 style="margin-top:0">3. Состав заказа</h2>
       <div id="order-flags"></div>
 
       <div class="table-wrap">
@@ -119,6 +124,8 @@
   <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
   <script src="config.js"></script>
   <script src="js/supabase-client.js"></script>
+  <script src="js/dictionary.js"></script>
+  <script src="js/normalize.js"></script>
   <script src="js/openai.js"></script>
   <script src="js/excel.js"></script>
   <script src="js/new-order.js"></script>
