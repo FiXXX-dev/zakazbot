@@ -17,7 +17,8 @@ GPT-4o-mini выделяет позиции → менеджер правит т
 
 - Локальный сервер: `npx serve .` (подойдёт любой статический сервер)
 - Сборки и линтера нет — проверять страницы в браузере
-- Юнит-тесты логики (без браузера): `node tests/client-detect.test.js`
+- Юнит-тесты логики (без браузера): `node tests/client-detect.test.js`,
+  `node tests/order-merge.test.js`
 - Схема БД: выполнить `sql/schema.sql` в SQL Editor Supabase
 - Edge Function: `supabase functions deploy openaiproxy`,
   ключ: `supabase secrets set OPENAI_API_KEY=sk-...`
@@ -34,6 +35,7 @@ GPT-4o-mini выделяет позиции → менеджер правит т
 | `js/dictionary.js` | `window.ZakazDictionary` — словарь (числительные, единицы, исправления, маркеры самоисправлений, имена сотрудников `managerNames`), оба алфавита. ДАННЫЕ, пополняется без правки кода |
 | `js/normalize.js` | `window.Normalizer.normalizeTranscript()` — этап между Whisper и GPT |
 | `js/client-detect.js` | `window.ClientDetect.pickClient()` — выбор клиента из нескольких имён (база/приветствия/сотрудники). Чистая логика, тесты в `tests/` |
+| `js/order-merge.js` | `window.OrderMerge.mergeStandardOrder()` — слияние стандартного заказа («как обычно») с изменениями: обновление/удаление позиций, дедуп. Чистая логика, тесты в `tests/` |
 | `js/openai.js` | Whisper + GPT-4o-mini, режимы edge/direct, системный промпт |
 | `js/excel.js` | `window.ExcelUtils.downloadOrderExcel(order)` — выгрузка XLSX |
 | `supabase/functions/openaiproxy/index.ts` | Edge Function — прокси к OpenAI |
