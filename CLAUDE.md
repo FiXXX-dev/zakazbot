@@ -16,7 +16,8 @@ GPT-4o-mini выделяет позиции → менеджер правит т
 ## Запуск и проверка
 
 - Локальный сервер: `npx serve .` (подойдёт любой статический сервер)
-- Сборки, тестов и линтера нет — проверять страницы в браузере
+- Сборки и линтера нет — проверять страницы в браузере
+- Юнит-тесты логики (без браузера): `node tests/client-detect.test.js`
 - Схема БД: выполнить `sql/schema.sql` в SQL Editor Supabase
 - Edge Function: `supabase functions deploy openaiproxy`,
   ключ: `supabase secrets set OPENAI_API_KEY=sk-...`
@@ -30,8 +31,9 @@ GPT-4o-mini выделяет позиции → менеджер правит т
 | `clients.html` + `js/clients.js` | Клиенты: поиск, история заказов, стандартный заказ («как обычно») |
 | `admin.html` + `js/admin.js` | Админ: импорт товаров и клиентов из .csv/.xlsx (SheetJS) в `products` / `clients` |
 | `js/supabase-client.js` | Создаёт `window.sb` (клиент Supabase) |
-| `js/dictionary.js` | `window.ZakazDictionary` — словарь (числительные, единицы, исправления, маркеры самоисправлений), оба алфавита. ДАННЫЕ, пополняется без правки кода |
+| `js/dictionary.js` | `window.ZakazDictionary` — словарь (числительные, единицы, исправления, маркеры самоисправлений, имена сотрудников `managerNames`), оба алфавита. ДАННЫЕ, пополняется без правки кода |
 | `js/normalize.js` | `window.Normalizer.normalizeTranscript()` — этап между Whisper и GPT |
+| `js/client-detect.js` | `window.ClientDetect.pickClient()` — выбор клиента из нескольких имён (база/приветствия/сотрудники). Чистая логика, тесты в `tests/` |
 | `js/openai.js` | Whisper + GPT-4o-mini, режимы edge/direct, системный промпт |
 | `js/excel.js` | `window.ExcelUtils.downloadOrderExcel(order)` — выгрузка XLSX |
 | `supabase/functions/openaiproxy/index.ts` | Edge Function — прокси к OpenAI |
@@ -77,6 +79,12 @@ GPT-4o-mini выделяет позиции → менеджер правит т
 7. **Логирование (`order_logs`) — best-effort.** Сбой записи лога или загрузки
    аудио в Storage НЕ должен ломать сохранение заказа. Поэтому это отдельная
    таблица, а не колонки в `orders`: приём заказов работает даже без миграции.
+
+8. **Определение клиента — по нескольким именам.** Модель отдаёт `name_candidates`
+   (все имена + флаг `greeting`); клиента выбирает `ClientDetect.pickClient`:
+   сотрудники (`managerNames`) исключаются, имя из базы клиентов в приоритете,
+   среди равных предпочитается не приветственное. Чистую логику покрывают
+   тесты `tests/client-detect.test.js` — менять её синхронно с ними.
 
 ## Данные
 

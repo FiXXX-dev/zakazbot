@@ -117,23 +117,20 @@
     }) || null;
   }
 
-  // Загружает стандартный заказ клиента по имени от GPT и подставляет телефон/имя.
-  // Имя часто неполное («навруз» → «Ресторан Навруз»), поэтому ищем регистро-
-  // независимо (ilike): сначала по всему имени, затем по каждому слову длиннее
-  // 2 символов. Возвращает массив позиций стандартного заказа (клиент найден,
-  // заказ может быть пустым) либо null (клиент в базе не найден).
-  async function loadStandardOrder(name) {
+  // Ищет клиента в базе по имени. Имя часто неполное («навруз» → «Ресторан
+  // Навруз»), поэтому ищем регистронезависимо (ilike): сначала по всему имени,
+  // затем по каждому слову длиннее 2 символов. Возвращает запись клиента
+  // { name, phone, standard_order } или null. БЕЗ побочных эффектов.
+  async function findClientInDb(name) {
     if (!name || !window.sb) return null;
 
-    // Сначала — поиск по имени целиком.
     let { data } = await window.sb.from("clients")
       .select("name, phone, standard_order")
       .ilike("name", likeContains(name))
       .limit(1);
 
-    // Не нашли — пробуем каждое слово отдельно (короткие слова игнорируем).
     if (!data || !data.length) {
-      const words = name.split(/\s+/).filter(function (w) { return w.length > 2; });
+      const words = String(name).split(/\s+/).filter(function (w) { return w.length > 2; });
       for (const word of words) {
         const res = await window.sb.from("clients")
           .select("name, phone, standard_order")
@@ -143,14 +140,88 @@
       }
     }
 
-    if (!data || !data.length) return null;
+    return data && data.length ? data[0] : null;
+  }
 
-    const client = data[0];
-    // Автоподстановка: телефон (если поле пустое) и каноническое имя из базы —
-    // по нему заказ свяжется с историей клиента.
-    if (client.phone && !els.clientPhone.value.trim()) els.clientPhone.value = client.phone;
-    els.clientName.value = client.name;
-    return Array.isArray(client.standard_order) ? client.standard_order : [];
+  // Определяет клиента из нескольких имён (голосовой заказ может содержать
+  // приветствия менеджеру и собственно клиента). Кандидаты от модели
+  // (name_candidates + client_name) проверяются по базе; выбор делает чистая
+  // window.ClientDetect.pickClient (её покрывают тесты), учитывая базу,
+  // приветствия (greeting) и список сотрудников (ZakazDictionary.managerNames).
+  async function resolveClient(parsed) {
+    const raw = [];
+    if (Array.isArray(parsed.name_candidates)) {
+      parsed.name_candidates.forEach(function (c) {
+        if (c && c.name) raw.push({ name: String(c.name).trim(), greeting: c.greeting === true });
+      });
+    }
+    // client_name от модели — запасной кандидат, если его ещё нет в списке.
+    if (parsed.client_name) {
+      const nm = String(parsed.client_name).trim();
+      if (nm && !raw.some(function (c) { return c.name.toLowerCase() === nm.toLowerCase(); })) {
+        raw.unshift({ name: nm, greeting: false });
+      }
+    }
+    if (!raw.length || !window.ClientDetect) {
+      return { chosen: null, checked: [], reason: "no-candidates" };
+    }
+
+    // Проверяем каждого кандидата по базе клиентов.
+    const checked = [];
+    for (const c of raw) {
+      const dbClient = await findClientInDb(c.name);
+      checked.push({ name: c.name, greeting: c.greeting, inDb: !!dbClient, dbClient: dbClient });
+    }
+
+    const managers = (window.ZakazDictionary && window.ZakazDictionary.managerNames) || [];
+    const res = window.ClientDetect.pickClient(checked, managers);
+    let chosen = null;
+    if (res.chosen) {
+      chosen = checked.find(function (c) {
+        return c.name.toLowerCase() === res.chosen.name.toLowerCase();
+      }) || null;
+    }
+    return { chosen: chosen, checked: checked, reason: res.reason };
+  }
+
+  // Короткое пояснение менеджеру, как определён клиент при нескольких именах.
+  function clientResolutionNote(resolution, found) {
+    const checked = resolution.checked || [];
+    if (!resolution.chosen) {
+      if (checked.length) {
+        return '<div class="msg msg-warn">Не удалось уверенно определить клиента среди имён: ' +
+          esc(checked.map(function (c) { return c.name; }).join(", ")) +
+          '. Укажите клиента вручную.</div>';
+      }
+      return "";
+    }
+    if (checked.length < 2) return ""; // одно имя — пояснять нечего
+
+    const managers = managerSetLocal();
+    const names = checked.map(function (c) {
+      const tags = [];
+      if (managers.has(c.name.toLowerCase())) tags.push("сотрудник");
+      if (c.inDb) tags.push("в базе");
+      if (c.greeting) tags.push("приветствие");
+      return esc(c.name) + (tags.length ? " (" + tags.join(", ") + ")" : "");
+    }).join(", ");
+
+    const why = resolution.reason === "single-db-match" || resolution.reason === "db-match"
+      ? "есть в базе клиентов"
+      : resolution.reason === "non-greeting"
+        ? "не приветственное обращение"
+        : "наиболее вероятный";
+    const cls = found ? "msg-info" : "msg-warn";
+    return '<div class="msg ' + cls + '">Имена в записи: ' + names +
+      '. Клиент определён как «' + esc(resolution.chosen.name) + '» (' + why +
+      "). Проверьте при необходимости.</div>";
+  }
+
+  function managerSetLocal() {
+    const arr = (window.ZakazDictionary && window.ZakazDictionary.managerNames) || [];
+    const s = new Set();
+    arr.forEach(function (n) { s.add(String(n).toLowerCase()); });
+    return s;
   }
 
   // Экранирует спецсимволы LIKE (% _ \) и оборачивает в %…% (поиск подстроки).
@@ -285,13 +356,31 @@
     let newItems = (Array.isArray(parsed.items) ? parsed.items : []).map(normalizeItem);
     const flagsHtml = [];
 
-    if (parsed.client_name && !els.clientName.value.trim()) {
-      els.clientName.value = String(parsed.client_name);
+    // ── Определение клиента ──
+    // Если менеджер уже вписал клиента — уважаем его выбор. Иначе выбираем
+    // среди кандидатов с учётом базы, приветствий и списка сотрудников.
+    let dbClient = null;
+    let resolution = null;
+    if (els.clientName.value.trim()) {
+      dbClient = await findClientInDb(els.clientName.value);
+    } else {
+      resolution = await resolveClient(parsed);
+      if (resolution.chosen) {
+        els.clientName.value = resolution.chosen.name;
+        dbClient = resolution.chosen.dbClient || null;
+      }
     }
 
-    // Нечёткий поиск клиента в базе + автоподстановка телефона и имени.
-    // standardOrder: массив позиций (клиент найден) либо null (не найден).
-    const standardOrder = await loadStandardOrder(els.clientName.value);
+    // Автоподстановка из базы: каноническое имя + телефон (если поле пустое).
+    if (dbClient) {
+      if (dbClient.phone && !els.clientPhone.value.trim()) els.clientPhone.value = dbClient.phone;
+      els.clientName.value = dbClient.name;
+    }
+
+    // standardOrder: массив позиций (клиент найден в базе) либо null (не найден).
+    const standardOrder = dbClient
+      ? (Array.isArray(dbClient.standard_order) ? dbClient.standard_order : [])
+      : null;
     const found = standardOrder !== null;
     const clientName = els.clientName.value.trim();
 
@@ -300,6 +389,12 @@
     }
     if (parsed.client_comment) {
       flagsHtml.push('<div class="client-sub">Комментарий клиента: ' + esc(parsed.client_comment) + "</div>");
+    }
+
+    // Пояснение по выбору клиента, если в записи было несколько имён.
+    if (resolution) {
+      const note = clientResolutionNote(resolution, found);
+      if (note) flagsHtml.push(note);
     }
 
     // «Как обычно» — подставляем стандартный заказ клиента из базы.
