@@ -105,8 +105,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const upstream = new FormData();
       upstream.append("file", file, file.name || "audio.ogg");
       upstream.append("model", "whisper-1");
+      // prompt смещает распознавание к узбекской торговой лексике/числам.
+      // language НЕ задаём: OpenAI отклоняет код "uz" ("Language 'uz' is not
+      // supported"), а автоопределение корректно берёт и узбекскую, и смешанную
+      // русско-узбекскую речь. Подсказка ниже помогает с узбекскими словами.
       upstream.append("prompt", "Заказ товаров на узбекском языке. Числа: ikki ta, ikki yuz ta, besh ta, o'n ta, yigirma ta, ellik ta, yuz ta, ming ta, ikki ming ta. Товары: plastik stakan, plastik vilka, qoshiq, idish, paket, qop, korobka. Самоисправления: yo'q, yo'q yo'q, emas.");
-      upstream.append("language", "uz");
 
       const resp = await fetch(`${OPENAI_API}/audio/transcriptions`, {
         method: "POST",
