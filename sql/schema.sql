@@ -163,10 +163,46 @@ create table if not exists public.subscriptions (
   user_id     uuid not null references auth.users(id) on delete cascade default auth.uid(),
   client_name text,
   status      text not null default 'active'  check (status in ('active', 'expired')),
-  plan        text not null default 'basic'   check (plan in ('basic', 'standard', 'business')),
+  plan        text not null default 'basic'   check (plan in ('basic', 'pro')),
   created_at  timestamptz not null default now(),
+  expires_at  timestamptz,
   unique (user_id)
 );
+
+-- Миграция существующей таблицы к (basic/pro) + expires_at (idempotent):
+alter table public.subscriptions add column if not exists expires_at timestamptz;
+update public.subscriptions set plan = 'pro' where plan in ('standard', 'business');
+alter table public.subscriptions drop constraint if exists subscriptions_plan_check;
+alter table public.subscriptions add constraint subscriptions_plan_check check (plan in ('basic', 'pro'));
+
+-- ─── Лимиты и фичи тарифов (справочник) ─────────────────────────────
+create table if not exists public.plan_limits (
+  plan                 text primary key,
+  max_products         integer,        -- NULL = безлимит
+  max_clients          integer,        -- NULL = безлимит
+  has_analytics        boolean not null default false,
+  has_1c_integration   boolean not null default false,
+  has_priority_support boolean not null default false,
+  has_custom_branding  boolean not null default false
+);
+
+insert into public.plan_limits
+  (plan, max_products, max_clients, has_analytics, has_1c_integration, has_priority_support, has_custom_branding)
+values
+  ('basic', 500, 50, false, false, false, false),
+  ('pro',   null, null, true, true, true, true)
+on conflict (plan) do update set
+  max_products         = excluded.max_products,
+  max_clients          = excluded.max_clients,
+  has_analytics        = excluded.has_analytics,
+  has_1c_integration   = excluded.has_1c_integration,
+  has_priority_support = excluded.has_priority_support,
+  has_custom_branding  = excluded.has_custom_branding;
+
+alter table public.plan_limits enable row level security;
+drop policy if exists "plan_limits read" on public.plan_limits;
+create policy "plan_limits read" on public.plan_limits
+  for select to authenticated using (true);
 create index if not exists subscriptions_user_idx on public.subscriptions (user_id);
 alter table public.subscriptions enable row level security;
 

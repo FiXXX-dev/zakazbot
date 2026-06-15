@@ -17,7 +17,11 @@
     cfNotes: document.getElementById("cf-notes"),
     cfSave: document.getElementById("cf-save"),
     cfCancel: document.getElementById("cf-cancel"),
-    cfMsg: document.getElementById("cf-msg")
+    cfMsg: document.getElementById("cf-msg"),
+    tabs: document.getElementById("view-tabs"),
+    tabAnalytics: document.getElementById("tab-analytics"),
+    clientsView: document.getElementById("clients-view"),
+    analyticsView: document.getElementById("analytics-view")
   };
 
   let clients = [];
@@ -45,7 +49,24 @@
     els.addBtn.addEventListener("click", function () { openForm(null); });
     els.cfSave.addEventListener("click", saveForm);
     els.cfCancel.addEventListener("click", closeForm);
+    setupTabs();
     loadClients();
+  }
+
+  // Вкладка «Аналитика» — только для тарифа Pro.
+  function setupTabs() {
+    if (window.Plan && window.Plan.isPro()) els.tabAnalytics.style.display = "";
+    els.tabs.querySelectorAll("button").forEach(function (btn) {
+      btn.addEventListener("click", function () { switchView(btn.dataset.view, btn); });
+    });
+  }
+
+  function switchView(view, btn) {
+    els.tabs.querySelectorAll("button").forEach(function (b) { b.classList.toggle("active", b === btn); });
+    const analytics = view === "analytics";
+    els.clientsView.classList.toggle("hidden", analytics);
+    els.analyticsView.classList.toggle("hidden", !analytics);
+    if (analytics && window.Analytics) window.Analytics.render(els.analyticsView, userId);
   }
 
   async function loadClients() {

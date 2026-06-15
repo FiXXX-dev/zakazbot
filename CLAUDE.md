@@ -32,9 +32,12 @@ GPT-4o-mini выделяет позиции → менеджер правит т
 | `clients.html` + `js/clients.js` | Клиенты: поиск, история заказов, стандартный заказ («как обычно») |
 | `admin.html` + `js/admin.js` | Импорт товаров и клиентов из .csv/.xlsx (SheetJS) в `products` / `clients` (на текущего пользователя) |
 | `login.html` + `js/login.js` | Вход/регистрация через Supabase Auth (email/пароль) |
-| `dashboard.html` + `js/dashboard.js` | Админ-панель владельца: все подписки, статистика, управление планом/статусом. Доступ только `CONFIG.ADMIN_EMAIL` |
+| `dashboard.html` + `js/dashboard.js` | Админ-панель владельца: все подписки, статистика, управление планом (basic/pro)/статусом. Доступ только `CONFIG.ADMIN_EMAIL` |
+| `settings.html` + `js/settings.js` | Тариф пользователя: текущий план/даты, сравнение Basic/Pro, заявка на Upgrade (письмо админу) |
 | `js/supabase-client.js` | Создаёт `window.sb` (клиент Supabase) |
-| `js/auth.js` | `window.Auth` — гард доступа (`guard()`/`guard({admin:true})`), редирект на login, инъекция «Выйти» в шапку, `isAdmin()` |
+| `js/auth.js` | `window.Auth` — гард доступа (`guard()`/`guard({admin:true})`), редирект на login, инъекция «Выйти»/«Тариф» в шапку, `isAdmin()`. Гард сам грузит `Plan` и рисует баннеры лимитов |
+| `js/plan.js` | `window.Plan` — загрузка подписки + `plan_limits` (фичефлаги/лимиты), `isPro()`, `has(feature)`, баннеры лимитов |
+| `js/analytics.js` | `window.Analytics.render()` — графики (Chart.js) на вкладке «Аналитика» (только Pro) |
 | `js/dictionary.js` | `window.ZakazDictionary` — словарь (числительные, единицы, исправления, маркеры самоисправлений, имена сотрудников `managerNames`), оба алфавита. ДАННЫЕ, пополняется без правки кода |
 | `js/normalize.js` | `window.Normalizer.normalizeTranscript()` — этап между Whisper и GPT |
 | `js/client-detect.js` | `window.ClientDetect.pickClient()` — выбор клиента из нескольких имён (база/приветствия/сотрудники). Чистая логика, тесты в `tests/` |
@@ -93,7 +96,7 @@ GPT-4o-mini выделяет позиции → менеджер правит т
    среди равных предпочитается не приветственное. Чистую логику покрывают
    тесты `tests/client-detect.test.js` — менять её синхронно с ними.
 
-9. **Доступ и мультиарендность.** Страницы index/new-order/clients/admin/dashboard
+9. **Доступ и мультиарендность.** Страницы index/new-order/clients/admin/dashboard/settings
    защищены: в начале — `window.Auth.guard()` (dashboard — `guard({admin:true})`),
    логика страницы запускается только при наличии пользователя. Все строки
    принадлежат `user_id`; на чтениях фильтруем `.eq("user_id", userId)`, на
@@ -101,6 +104,12 @@ GPT-4o-mini выделяет позиции → менеджер правит т
    (`user_id = auth.uid()`), а не только фронтенд. Админ (`CONFIG.ADMIN_EMAIL`
    = email в `is_admin()` в SQL) видит всё. `login.html` НЕ подключает `auth.js`
    (иначе цикл редиректов).
+
+10. **Тарифы (basic/pro).** Лимиты и фичи — в `plan_limits` (`js/plan.js`).
+    Баннеры лимитов рисует `Auth.guard()` → `Plan.renderBanners()` на страницах,
+    где подключён `js/plan.js`. Гейтинг — мягкий: баннеры предупреждают, но не
+    блокируют (жёсткой блокировки при превышении лимита/`expired` пока нет).
+    Вкладка «Аналитика» и кнопка Upgrade завязаны на `Plan.isPro()`/`has()`.
 
 ## Данные
 
@@ -113,11 +122,15 @@ order_logs: id uuid, created_at, order_id, client_name, source, audio_url,
             transcript_raw, transcript_normalized, corrections jsonb,
             had_self_correction, items jsonb   (логи распознавания для обучения)
 subscriptions: id uuid, user_id (uniq), client_name, status ('active'|'expired'),
-            plan ('basic'|'standard'|'business'), created_at
+            plan ('basic'|'pro'), created_at, expires_at
+plan_limits: plan (pk 'basic'|'pro'), max_products, max_clients (NULL=безлимит),
+            has_analytics, has_1c_integration, has_priority_support, has_custom_branding
 ```
 
 У `orders`/`clients`/`products`/`order_logs` есть `user_id` (владелец строки).
-RLS: пользователь видит свои строки, админ (`is_admin()`) — все.
+RLS: пользователь видит свои строки, админ (`is_admin()`) — все. `plan_limits` —
+справочник, читают все авторизованные. Менять `plan`/`status` подписки может
+только админ (через dashboard); пользователь не может сам себе включить Pro.
 
 Элемент `items` / `standard_order`:
 `{ name, qty: number|null, unit, price: number|null, confidence: "high"|"medium"|"low",

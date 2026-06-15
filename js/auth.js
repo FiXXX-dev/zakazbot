@@ -35,6 +35,10 @@
     if (opts.admin && !isAdmin(user)) { location.replace("index.html"); return null; }
     await ensureSubscription(user);
     injectNav(user);
+    // Тариф и баннеры лимитов (если на странице подключён js/plan.js).
+    if (window.Plan) {
+      try { await window.Plan.load(user.id); window.Plan.renderBanners(); } catch (e) { /* best-effort */ }
+    }
     return user;
   }
 
@@ -65,6 +69,13 @@
         d.href = "dashboard.html";
         d.textContent = "Подписки";
         nav.appendChild(d);
+      }
+
+      if (!nav.querySelector('a[href="settings.html"]')) {
+        const s = document.createElement("a");
+        s.href = "settings.html";
+        s.textContent = "Тариф";
+        nav.appendChild(s);
       }
 
       const area = document.createElement("span");
