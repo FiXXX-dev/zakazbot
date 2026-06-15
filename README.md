@@ -34,9 +34,8 @@ MVP веб-приложения для менеджера поставщика H
 | `new-order.html` | Создание заказа: аудио (.ogg/.mp3/.wav/.m4a) или текст → «Распознать заказ» → редактируемая таблица позиций (жёлтым — что нужно уточнить), клиент и телефон, Excel, сохранение |
 | `clients.html` | База клиентов: поиск, история заказов, стандартный заказ — подставляется, когда клиент говорит «как обычно» |
 | `admin.html` | Импорт товаров (`products`) и клиентов (`clients`) из .csv/.xlsx (для своего аккаунта) |
-| `login.html` | Вход и регистрация через Supabase Auth (email/пароль) |
-| `dashboard.html` | Админ-панель владельца: все подписки, статистика, управление планом (basic/pro)/статусом (только для `ADMIN_EMAIL`) |
-| `settings.html` | Тариф пользователя: текущий план, сравнение Basic/Pro, заявка на Upgrade |
+| `admin-dashboard.html` | Админка владельца: создание клиентов и выдача ACCESS_KEY, управление планом/статусом (пароль — серверный секрет) |
+| `settings.html` | Тариф клиента: текущий план, сравнение Basic/Pro, заявка на Upgrade |
 
 ## Стек
 
@@ -54,19 +53,20 @@ MVP веб-приложения для менеджера поставщика H
 2. **SQL Editor** → выполните содержимое `sql/schema.sql`
    (таблицы `orders`, `clients`, `products`, `order_logs`, `subscriptions`,
    бакет `order-audio`, RLS по `user_id` + админ). Скрипт идемпотентен.
-3. **Authentication → Providers → Email** — включите. Для мгновенного входа без
-   письма временно выключите «Confirm email». В `config.js` и в функции
-   `is_admin()` (в `sql/schema.sql`) укажите **один и тот же** `ADMIN_EMAIL`.
-   После первого входа привяжите старые данные к своему аккаунту — см. блок
-   «миграция существующих данных» в `sql/schema.sql` (`update … set user_id = …`).
-4. Установите [Supabase CLI](https://supabase.com/docs/guides/cli) и
-   задеплойте Edge Function с ключом OpenAI:
+3. **Authentication → Providers → Email** — включите (письма не нужны: аккаунты
+   создаёт владелец через `admin-dashboard.html` с подтверждённым email).
+   Публичную регистрацию можно выключить — вход только по ACCESS_KEY.
+4. Установите [Supabase CLI](https://supabase.com/docs/guides/cli), задайте
+   секреты и задеплойте Edge Functions (или просто запушьте в `main` — их
+   деплоит CI `.github/workflows/deploy-functions.yml`):
 
    ```bash
    supabase login
    supabase link --project-ref <PROJECT_REF>
    supabase secrets set OPENAI_API_KEY=sk-...
+   supabase secrets set ADMIN_PANEL_SECRET=<пароль_админки>   # для admin-dashboard.html
    supabase functions deploy openaiproxy
+   supabase functions deploy clientauth
    ```
 
 ### 2. Конфигурация фронтенда
@@ -166,8 +166,7 @@ juft=пар, qop=мешок, korobka=коробка, upakovka=упаковка).
 ├── new-order.html          # Создание заказа
 ├── clients.html            # База клиентов
 ├── admin.html              # Импорт товаров/клиентов
-├── login.html              # Вход/регистрация (Supabase Auth)
-├── dashboard.html          # Админ-панель: подписки и статистика
+├── admin-dashboard.html    # Админка владельца: клиенты и ACCESS_KEY
 ├── settings.html           # Тариф пользователя (Basic/Pro)
 ├── config.example.js       # Шаблон конфигурации
 ├── config.js               # Конфигурация (в репозитории, только публичные значения)
@@ -175,10 +174,9 @@ juft=пар, qop=мешок, korobka=коробка, upakovka=упаковка).
 │   └── style.css
 ├── js/
 │   ├── supabase-client.js  # window.sb — клиент Supabase
-│   ├── auth.js             # window.Auth — гард доступа, login-редирект, is_admin
+│   ├── auth.js             # window.Auth — вход по ACCESS_KEY (форма ключа)
 │   ├── plan.js             # window.Plan — тарифы/лимиты (plan_limits), баннеры
-│   ├── login.js            # Логика login.html (вход/регистрация)
-│   ├── dashboard.js        # Логика dashboard.html (подписки, статистика)
+│   ├── admin-dashboard.js  # Логика admin-dashboard.html (клиенты, ключи)
 │   ├── settings.js         # Логика settings.html (тариф, upgrade)
 │   ├── analytics.js        # Графики Chart.js (вкладка «Аналитика», Pro)
 │   ├── dictionary.js       # Словарь нормализации + имена сотрудников (managerNames)
@@ -192,9 +190,11 @@ juft=пар, qop=мешок, korobka=коробка, upakovka=упаковка).
 │   ├── clients.js          # Логика clients.html
 │   └── admin.js            # Логика admin.html (импорт .csv/.xlsx)
 ├── sql/
-│   └── schema.sql          # Таблицы (+ order_logs) + бакет order-audio + RLS
+│   └── schema.sql          # Таблицы + RLS (+ subscriptions/plan_limits/clients_accounts)
 ├── supabase/functions/openaiproxy/
 │   └── index.ts            # Edge Function — прокси к OpenAI
+├── supabase/functions/clientauth/
+│   └── index.ts            # Edge Function — вход по ACCESS_KEY + админ-операции
 ├── CLAUDE.md
 └── README.md
 ```

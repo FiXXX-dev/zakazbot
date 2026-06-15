@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Админка клиентов — ZakazBot</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <span class="brand">Zakaz<span>Bot</span> · Админка</span>
+      <nav><a href="#" id="admin-logout" style="display:none">Выйти</a></nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <h1>Клиенты и ключи доступа</h1>
+    <div id="setup-warning"></div>
+
+    <!-- Гейт по паролю администратора (проверяется на сервере) -->
+    <section class="card" id="admin-gate" style="max-width:460px">
+      <div class="field">
+        <label for="admin-pass">Пароль администратора</label>
+        <input type="password" id="admin-pass" autocomplete="current-password">
+      </div>
+      <div style="margin-top:12px"><button type="button" id="admin-enter" class="btn">Войти</button></div>
+      <div id="gate-msg"></div>
+    </section>
+
+    <!-- Панель (после ввода пароля) -->
+    <div id="admin-panel" class="hidden">
+      <section class="card">
+        <h2 style="margin-top:0">Новый клиент</h2>
+        <div class="form-row">
+          <div class="field">
+            <label for="nc-company">Название компании *</label>
+            <input type="text" id="nc-company" placeholder="ОптТорг">
+          </div>
+          <div class="field">
+            <label for="nc-email">Email (для уведомлений, необязательно)</label>
+            <input type="email" id="nc-email" placeholder="client@company.uz">
+          </div>
+          <div class="field">
+            <label for="nc-plan">План</label>
+            <select id="nc-plan">
+              <option value="basic">Basic</option>
+              <option value="pro">Pro</option>
+            </select>
+          </div>
+        </div>
+        <button type="button" id="nc-create" class="btn">Создать клиента</button>
+        <div id="nc-result"></div>
+      </section>
+
+      <section class="card">
+        <h2 style="margin-top:0">Все клиенты</h2>
+        <div id="clients-table"></div>
+      </section>
+    </div>
+  </main>
+
+  <script src="config.js"></script>
+  <script src="js/admin-dashboard.js"></script>
+</body>
+</html>

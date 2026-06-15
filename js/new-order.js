@@ -58,7 +58,7 @@
       return;
     }
     window.Auth.guard().then(function (user) {
-      if (!user) return; // не залогинен — guard перенаправил на login.html
+      if (!user) return; // нет сессии — guard показал форму входа по ключу
       userId = user.id;
       init();
     });
