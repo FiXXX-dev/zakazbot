@@ -46,15 +46,25 @@
   let lastSavedSignature = null; // защита от случайного двойного сохранения
   // Данные последнего распознавания — для логирования в order_logs при сохранении.
   let lastRecognition = null; // { rawTranscript, normalizedTranscript, corrections, hadSelfCorrection, audioFile, inputSource }
+  let userId = null;
 
-  init();
+  boot();
 
-  function init() {
+  function boot() {
     if (!window.sb) {
       els.setup.innerHTML =
         '<div class="msg msg-warn">Supabase не настроен: скопируйте <code>config.example.js</code> в <code>config.js</code> и заполните ключи. Распознавание и сохранение работать не будут.</div>';
+      init(); // ручной ввод таблицы и Excel доступны и без БД
+      return;
     }
+    window.Auth.guard().then(function (user) {
+      if (!user) return; // не залогинен — guard перенаправил на login.html
+      userId = user.id;
+      init();
+    });
+  }
 
+  function init() {
     els.tabs.querySelectorAll("button").forEach(function (btn) {
       btn.addEventListener("click", function () { switchMode(btn.dataset.mode); });
     });
@@ -100,6 +110,7 @@
     const { data, error } = await window.sb
       .from("clients")
       .select("*")
+      .eq("user_id", userId)
       .order("name", { ascending: true });
     if (error || !data) return;
     clientsCache = data;
@@ -114,7 +125,7 @@
   // Каталог товаров — для подстановки цены по названию позиции (best-effort).
   async function loadProducts() {
     if (!window.sb) return;
-    const { data, error } = await window.sb.from("products").select("name, unit, price");
+    const { data, error } = await window.sb.from("products").select("name, unit, price").eq("user_id", userId);
     if (!error && data) productsCache = data;
   }
 
@@ -151,6 +162,7 @@
 
     let { data } = await window.sb.from("clients")
       .select("name, phone, standard_order")
+      .eq("user_id", userId)
       .ilike("name", likeContains(name))
       .limit(1);
 
@@ -159,6 +171,7 @@
       for (const word of words) {
         const res = await window.sb.from("clients")
           .select("name, phone, standard_order")
+          .eq("user_id", userId)
           .ilike("name", likeContains(word))
           .limit(1);
         if (res.data && res.data.length) { data = res.data; break; }
@@ -706,7 +719,8 @@
       client_phone: order.client_phone || null,
       status: "new",
       items: order.items,
-      source_text: sourceText || (mode === "text" ? els.orderText.value.trim() : "") || null
+      source_text: sourceText || (mode === "text" ? els.orderText.value.trim() : "") || null,
+      user_id: userId
     };
 
     const signature = JSON.stringify(payload);
@@ -744,7 +758,7 @@
       }
       const { data } = await window.sb
         .from("clients")
-        .insert({ name: name, phone: phone || null })
+        .insert({ name: name, phone: phone || null, user_id: userId })
         .select()
         .single();
       if (data) {
@@ -772,6 +786,7 @@
 
       const payload = {
         order_id: orderId || null,
+        user_id: userId,
         client_name: order.client_name || null,
         source: rec.inputSource || (mode === "audio" ? "audio" : "text"),
         audio_url: audioUrl,

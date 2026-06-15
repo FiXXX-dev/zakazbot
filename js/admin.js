@@ -13,9 +13,11 @@
     cMsg: document.getElementById("clients-msg")
   };
 
-  init();
+  let userId = null;
 
-  function init() {
+  boot();
+
+  function boot() {
     if (!window.sb) {
       els.setup.innerHTML =
         '<div class="msg msg-warn">Supabase не настроен: скопируйте <code>config.example.js</code> в <code>config.js</code> и заполните ключи. Импорт недоступен.</div>';
@@ -23,6 +25,14 @@
       els.cBtn.disabled = true;
       return;
     }
+    window.Auth.guard().then(function (user) {
+      if (!user) return;
+      userId = user.id;
+      init();
+    });
+  }
+
+  function init() {
     if (typeof XLSX === "undefined") {
       els.setup.innerHTML =
         '<div class="msg msg-error">Библиотека SheetJS не загрузилась (проверьте доступ к CDN). Чтение файлов недоступно.</div>';
@@ -100,7 +110,8 @@
         rows.push({
           name: name,
           unit: str(pick(r, ["Единица", "Ед.изм.", "Единица измерения", "unit"])) || null,
-          price: parsePrice(pick(r, ["Цена", "price"]))
+          price: parsePrice(pick(r, ["Цена", "price"])),
+          user_id: userId
         });
       });
 
@@ -134,7 +145,7 @@
 
       // Существующие имена — чтобы не плодить дубли при повторном импорте.
       const existing = new Set();
-      const { data: cur, error: curErr } = await window.sb.from("clients").select("name");
+      const { data: cur, error: curErr } = await window.sb.from("clients").select("name").eq("user_id", userId);
       if (curErr) throw new Error(curErr.message);
       (cur || []).forEach(function (c) { existing.add(str(c.name).toLowerCase()); });
 
@@ -150,7 +161,8 @@
         seen.add(key);
         rows.push({
           name: name,
-          phone: str(pick(r, ["Телефон", "Тел", "phone"])) || null
+          phone: str(pick(r, ["Телефон", "Тел", "phone"])) || null,
+          user_id: userId
         });
       });
 

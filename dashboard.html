@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Входящие заказы — ZakazBot</title>
+  <title>Подписки — ZakazBot</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -11,7 +11,7 @@
     <div class="container topbar-inner">
       <a class="brand" href="index.html">Zakaz<span>Bot</span></a>
       <nav>
-        <a href="index.html" class="active">Заказы</a>
+        <a href="index.html">Заказы</a>
         <a href="new-order.html">Новый заказ</a>
         <a href="clients.html">Клиенты</a>
         <a href="admin.html">Админ</a>
@@ -20,33 +20,28 @@
   </header>
 
   <main class="container">
-    <h1>Входящие заказы</h1>
+    <h1>Подписки клиентов</h1>
     <div id="setup-warning"></div>
+
+    <div id="stats" class="toolbar"></div>
 
     <div class="toolbar">
       <input type="search" id="search-input" class="grow" placeholder="Поиск по клиенту…">
       <select id="status-filter" title="Фильтр по статусу">
         <option value="all">Все статусы</option>
-        <option value="new">Новый</option>
-        <option value="processing">В работе</option>
-        <option value="ready">Готов</option>
-      </select>
-      <select id="date-filter" title="Фильтр по дате">
-        <option value="all">За всё время</option>
-        <option value="today">Сегодня</option>
+        <option value="active">Активные</option>
+        <option value="expired">Истёкшие</option>
       </select>
       <button type="button" id="refresh-btn" class="btn btn-outline">Обновить</button>
     </div>
 
-    <div id="orders-list"></div>
+    <div id="subs-list"></div>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
   <script src="config.js"></script>
   <script src="js/supabase-client.js"></script>
   <script src="js/auth.js"></script>
-  <script src="js/excel.js"></script>
-  <script src="js/orders.js"></script>
+  <script src="js/dashboard.js"></script>
 </body>
 </html>

@@ -22,16 +22,25 @@
 
   let clients = [];
   let editingId = null;
+  let userId = null;
 
-  init();
+  boot();
 
-  function init() {
+  function boot() {
     if (!window.sb) {
       els.setup.innerHTML =
         '<div class="msg msg-warn">Supabase не настроен: скопируйте <code>config.example.js</code> в <code>config.js</code> и заполните ключи.</div>';
       els.list.innerHTML = "";
       return;
     }
+    window.Auth.guard().then(function (user) {
+      if (!user) return;
+      userId = user.id;
+      init();
+    });
+  }
+
+  function init() {
     els.search.addEventListener("input", render);
     els.addBtn.addEventListener("click", function () { openForm(null); });
     els.cfSave.addEventListener("click", saveForm);
@@ -44,6 +53,7 @@
     const { data, error } = await window.sb
       .from("clients")
       .select("*")
+      .eq("user_id", userId)
       .order("name", { ascending: true });
     if (error) {
       els.list.innerHTML = '<div class="msg msg-error">Не удалось загрузить клиентов: ' + esc(error.message) + "</div>";
@@ -134,6 +144,7 @@
     const { data, error } = await window.sb
       .from("orders")
       .select("*")
+      .eq("user_id", userId)
       .ilike("client_name", pattern)
       .order("created_at", { ascending: false })
       .limit(30);
@@ -328,7 +339,8 @@
     const payload = {
       name: name,
       phone: els.cfPhone.value.trim() || null,
-      notes: els.cfNotes.value.trim() || null
+      notes: els.cfNotes.value.trim() || null,
+      user_id: userId
     };
     els.cfSave.disabled = true;
     const result = editingId
