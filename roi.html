@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ZakazBot — калькулятор окупаемости</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .roi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 640px) { .roi-grid { grid-template-columns: 1fr; } }
+    .roi-out { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+    .roi-out:last-child { border-bottom: none; }
+    .roi-out .val { font-weight: 600; white-space: nowrap; }
+    .roi-total { font-size: 18px; }
+    .hint { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <span class="brand">Zakaz<span>Bot</span> · ROI</span>
+    </div>
+  </header>
+
+  <main class="container">
+    <h1>Калькулятор окупаемости</h1>
+    <p style="color:var(--muted);max-width:680px">
+      Грубая оценка экономии от автоматизации приёма заказов: время менеджера +
+      предотвращённые ошибки. Поменяйте цифры под конкретного дистрибьютора —
+      используйте в разговоре о подписке. Все значения примерные, в сумах.
+    </p>
+
+    <section class="card">
+      <h2 style="margin-top:0">Ваши данные</h2>
+      <div class="roi-grid">
+        <div class="field">
+          <label for="ordersDay">Заказов в день</label>
+          <input type="number" id="ordersDay" value="80" min="0" step="1">
+        </div>
+        <div class="field">
+          <label for="workdays">Рабочих дней в месяц</label>
+          <input type="number" id="workdays" value="26" min="1" step="1">
+        </div>
+        <div class="field">
+          <label for="minNow">Минут на заказ сейчас (ручной ввод)</label>
+          <input type="number" id="minNow" value="4" min="0" step="0.5">
+        </div>
+        <div class="field">
+          <label for="minBot">Минут на заказ с ботом (проверка)</label>
+          <input type="number" id="minBot" value="1.5" min="0" step="0.5">
+        </div>
+        <div class="field">
+          <label for="rate">Ставка менеджера, сум/час</label>
+          <input type="number" id="rate" value="25000" min="0" step="1000">
+          <div class="hint">≈ месячная зарплата ÷ 176 часов</div>
+        </div>
+        <div class="field">
+          <label for="subscription">Подписка ZakazBot, сум/мес</label>
+          <input type="number" id="subscription" value="400000" min="0" step="10000">
+        </div>
+        <div class="field">
+          <label for="errNow">Ошибок на 100 заказов сейчас</label>
+          <input type="number" id="errNow" value="5" min="0" step="1">
+        </div>
+        <div class="field">
+          <label for="errCut">Снижение ошибок с ботом, %</label>
+          <input type="number" id="errCut" value="70" min="0" max="100" step="5">
+        </div>
+        <div class="field">
+          <label for="errCost">Средняя цена одной ошибки, сум</label>
+          <input type="number" id="errCost" value="50000" min="0" step="5000">
+          <div class="hint">пересорт, возврат, недовоз</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 style="margin-top:0">Результат в месяц</h2>
+      <div class="roi-out"><span>Заказов в месяц</span><span class="val" id="rOrders">—</span></div>
+      <div class="roi-out"><span>Сэкономлено времени</span><span class="val" id="rHours">—</span></div>
+      <div class="roi-out"><span>Экономия на времени</span><span class="val" id="rTimeMoney">—</span></div>
+      <div class="roi-out"><span>Ошибок предотвращено</span><span class="val" id="rErrors">—</span></div>
+      <div class="roi-out"><span>Экономия на ошибках</span><span class="val" id="rErrMoney">—</span></div>
+      <div class="roi-out roi-total"><span>Итого экономия</span><span class="val" id="rTotal">—</span></div>
+      <div class="roi-out roi-total"><span>Чистая выгода (минус подписка)</span><span class="val" id="rNet">—</span></div>
+      <div id="rVerdict" style="margin-top:12px"></div>
+    </section>
+  </main>
+
+  <script>
+    var ids = ["ordersDay","workdays","minNow","minBot","rate","subscription","errNow","errCut","errCost"];
+    function num(id) { var v = Number(document.getElementById(id).value); return isFinite(v) ? v : 0; }
+    function sum(n) { return Math.round(n).toLocaleString("ru-RU") + " сум"; }
+
+    function recompute() {
+      var ordersMonth = num("ordersDay") * num("workdays");
+      var minSaved = Math.max(0, num("minNow") - num("minBot"));
+      var hoursSaved = ordersMonth * minSaved / 60;
+      var timeMoney = hoursSaved * num("rate");
+
+      var errorsNow = ordersMonth * (num("errNow") / 100);
+      var errorsPrevented = errorsNow * (num("errCut") / 100);
+      var errMoney = errorsPrevented * num("errCost");
+
+      var total = timeMoney + errMoney;
+      var sub = num("subscription");
+      var net = total - sub;
+
+      document.getElementById("rOrders").textContent = Math.round(ordersMonth).toLocaleString("ru-RU");
+      document.getElementById("rHours").textContent = hoursSaved.toLocaleString("ru-RU", { maximumFractionDigits: 1 }) + " ч";
+      document.getElementById("rTimeMoney").textContent = sum(timeMoney);
+      document.getElementById("rErrors").textContent = errorsPrevented.toLocaleString("ru-RU", { maximumFractionDigits: 0 });
+      document.getElementById("rErrMoney").textContent = sum(errMoney);
+      document.getElementById("rTotal").textContent = sum(total);
+      document.getElementById("rNet").textContent = sum(net);
+
+      var v = document.getElementById("rVerdict");
+      if (sub <= 0) {
+        v.innerHTML = '<div class="msg msg-info">Укажите стоимость подписки, чтобы оценить окупаемость.</div>';
+      } else if (net > 0) {
+        var x = (total / sub);
+        v.innerHTML = '<div class="msg msg-success">Подписка окупается в <b>' +
+          x.toLocaleString("ru-RU", { maximumFractionDigits: 1 }) + '×</b>: экономия ' + sum(total) +
+          ' против ' + sum(sub) + ' подписки.</div>';
+      } else {
+        v.innerHTML = '<div class="msg msg-warn">При этих цифрах подписка пока не окупается. ' +
+          'Попробуйте реальные объёмы заказов и стоимость ошибок — обычно именно ошибки дают основную экономию.</div>';
+      }
+    }
+
+    ids.forEach(function (id) { document.getElementById(id).addEventListener("input", recompute); });
+    recompute();
+  </script>
+</body>
+</html>

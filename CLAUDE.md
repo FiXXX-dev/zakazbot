@@ -35,7 +35,9 @@ GPT-4o-mini выделяет позиции → менеджер правит т
 | `js/dictionary.js` | `window.ZakazDictionary` — словарь (числительные, единицы, исправления, маркеры самоисправлений, имена сотрудников `managerNames`), оба алфавита. ДАННЫЕ, пополняется без правки кода |
 | `js/normalize.js` | `window.Normalizer.normalizeTranscript()` — этап между Whisper и GPT |
 | `js/client-detect.js` | `window.ClientDetect.pickClient()` — выбор клиента из нескольких имён (база/приветствия/сотрудники). Чистая логика, тесты в `tests/` |
-| `js/order-merge.js` | `window.OrderMerge.mergeStandardOrder()` — слияние стандартного заказа («как обычно») с изменениями: обновление/удаление позиций, дедуп. Чистая логика, тесты в `tests/` |
+| `js/order-merge.js` | `window.OrderMerge.mergeStandardOrder()` — слияние стандартного заказа с изменениями (дедуп); `matchProduct()` — однозначный поиск товара в каталоге для подстановки цены. Чистая логика, тесты в `tests/` |
+| `roi.html` | Калькулятор окупаемости (отдельная страница для продаж, не в навигации) |
+| `docs/pilot.md` | Одностраничник пилота для дистрибьютора (оффер, метрики, скрипт) |
 | `js/openai.js` | Whisper + GPT-4o-mini, режимы edge/direct, системный промпт |
 | `js/excel.js` | `window.ExcelUtils.downloadOrderExcel(order)` — выгрузка XLSX |
 | `supabase/functions/openaiproxy/index.ts` | Edge Function — прокси к OpenAI |
