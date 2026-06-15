@@ -23,6 +23,12 @@
     <h1>База клиентов</h1>
     <div id="setup-warning"></div>
 
+    <div class="tabs" id="view-tabs">
+      <button type="button" data-view="clients" class="active">Клиенты</button>
+      <button type="button" data-view="analytics" id="tab-analytics" style="display:none">Аналитика</button>
+    </div>
+
+    <div id="clients-view">
     <div class="toolbar">
       <input type="search" id="search-input" class="grow" placeholder="Поиск по названию или телефону…">
       <button type="button" id="add-client-btn" class="btn">+ Добавить клиента</button>
@@ -52,6 +58,9 @@
     </section>
 
     <div id="clients-list"></div>
+    </div>
+
+    <div id="analytics-view" class="hidden"></div>
 
     <datalist id="units-datalist">
       <option value="шт"></option>
@@ -66,10 +75,13 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.js"></script>
   <script src="config.js"></script>
   <script src="js/supabase-client.js"></script>
   <script src="js/auth.js"></script>
+  <script src="js/plan.js"></script>
   <script src="js/excel.js"></script>
+  <script src="js/analytics.js"></script>
   <script src="js/clients.js"></script>
 </body>
 </html>
