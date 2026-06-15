@@ -121,3 +121,118 @@ create policy "order-audio anon read" on storage.objects
 
 create policy "order-audio anon insert" on storage.objects
   for insert to anon with check (bucket_id = 'order-audio');
+
+-- ═══════════════════════════════════════════════════════════════════
+-- Auth и разделение доступа (мультиарендность)
+-- ═══════════════════════════════════════════════════════════════════
+-- Включите Supabase Auth (Email). После этой миграции каждая строка
+-- принадлежит пользователю (user_id), и пользователь видит ТОЛЬКО свои данные.
+-- Администратор (см. is_admin ниже) видит всё — для dashboard.html.
+--
+-- ВАЖНО (миграция существующих данных): у старых строк user_id = NULL, и после
+-- включения политик они станут невидимы. Привяжите их к своему аккаунту:
+--   select id, email from auth.users;                    -- найдите свой UID
+--   update public.orders     set user_id = '<UID>' where user_id is null;
+--   update public.clients    set user_id = '<UID>' where user_id is null;
+--   update public.products   set user_id = '<UID>' where user_id is null;
+--   update public.order_logs set user_id = '<UID>' where user_id is null;
+
+-- ─── user_id во всех рабочих таблицах (default = текущий пользователь) ──
+alter table public.orders     add column if not exists user_id uuid references auth.users(id) on delete cascade default auth.uid();
+alter table public.clients    add column if not exists user_id uuid references auth.users(id) on delete cascade default auth.uid();
+alter table public.products   add column if not exists user_id uuid references auth.users(id) on delete cascade default auth.uid();
+alter table public.order_logs add column if not exists user_id uuid references auth.users(id) on delete cascade default auth.uid();
+
+create index if not exists orders_user_idx     on public.orders (user_id);
+create index if not exists clients_user_idx    on public.clients (user_id);
+create index if not exists products_user_idx   on public.products (user_id);
+create index if not exists order_logs_user_idx on public.order_logs (user_id);
+
+-- ─── Кто администратор (для dashboard.html) ─────────────────────────
+-- МЕНЯЙТЕ email на свой. Должен совпадать с CONFIG.ADMIN_EMAIL в config.js.
+create or replace function public.is_admin()
+returns boolean
+language sql stable
+as $$
+  select coalesce(lower(auth.jwt() ->> 'email') = lower('nurmuhamedovsa@gmail.com'), false);
+$$;
+
+-- ─── Подписки клиентов ──────────────────────────────────────────────
+create table if not exists public.subscriptions (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references auth.users(id) on delete cascade default auth.uid(),
+  client_name text,
+  status      text not null default 'active'  check (status in ('active', 'expired')),
+  plan        text not null default 'basic'   check (plan in ('basic', 'standard', 'business')),
+  created_at  timestamptz not null default now(),
+  unique (user_id)
+);
+create index if not exists subscriptions_user_idx on public.subscriptions (user_id);
+alter table public.subscriptions enable row level security;
+
+-- ─── Политики: владелец видит своё, админ — всё ─────────────────────
+-- Меняем открытые anon-политики на доступ для авторизованных по user_id.
+drop policy if exists "orders anon full access"   on public.orders;
+drop policy if exists "clients anon full access"  on public.clients;
+drop policy if exists "products anon full access" on public.products;
+drop policy if exists "order_logs anon full access" on public.order_logs;
+
+drop policy if exists "orders owner access"     on public.orders;
+drop policy if exists "clients owner access"    on public.clients;
+drop policy if exists "products owner access"   on public.products;
+drop policy if exists "order_logs owner access" on public.order_logs;
+
+create policy "orders owner access" on public.orders
+  for all to authenticated
+  using (user_id = auth.uid() or public.is_admin())
+  with check (user_id = auth.uid() or public.is_admin());
+
+create policy "clients owner access" on public.clients
+  for all to authenticated
+  using (user_id = auth.uid() or public.is_admin())
+  with check (user_id = auth.uid() or public.is_admin());
+
+create policy "products owner access" on public.products
+  for all to authenticated
+  using (user_id = auth.uid() or public.is_admin())
+  with check (user_id = auth.uid() or public.is_admin());
+
+create policy "order_logs owner access" on public.order_logs
+  for all to authenticated
+  using (user_id = auth.uid() or public.is_admin())
+  with check (user_id = auth.uid() or public.is_admin());
+
+-- subscriptions: пользователь видит и создаёт ТОЛЬКО свою (active/basic),
+-- менять статус/план может только администратор (чтобы нельзя было
+-- самому себе продлить подписку).
+drop policy if exists "subs select" on public.subscriptions;
+drop policy if exists "subs insert" on public.subscriptions;
+drop policy if exists "subs update" on public.subscriptions;
+drop policy if exists "subs delete" on public.subscriptions;
+
+create policy "subs select" on public.subscriptions
+  for select to authenticated
+  using (user_id = auth.uid() or public.is_admin());
+
+create policy "subs insert" on public.subscriptions
+  for insert to authenticated
+  with check ((user_id = auth.uid() and status = 'active' and plan = 'basic') or public.is_admin());
+
+create policy "subs update" on public.subscriptions
+  for update to authenticated
+  using (public.is_admin()) with check (public.is_admin());
+
+create policy "subs delete" on public.subscriptions
+  for delete to authenticated
+  using (public.is_admin());
+
+-- ─── Storage: загрузка/чтение аудио для авторизованных ──────────────
+drop policy if exists "order-audio anon read"   on storage.objects;
+drop policy if exists "order-audio anon insert" on storage.objects;
+drop policy if exists "order-audio auth read"   on storage.objects;
+drop policy if exists "order-audio auth insert" on storage.objects;
+
+create policy "order-audio auth read" on storage.objects
+  for select to authenticated using (bucket_id = 'order-audio');
+create policy "order-audio auth insert" on storage.objects
+  for insert to authenticated with check (bucket_id = 'order-audio');

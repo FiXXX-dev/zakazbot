@@ -15,16 +15,25 @@
   };
 
   let orders = [];
+  let userId = null;
 
-  init();
+  boot();
 
-  function init() {
+  function boot() {
     if (!window.sb) {
       els.setup.innerHTML =
         '<div class="msg msg-warn">Supabase не настроен: скопируйте <code>config.example.js</code> в <code>config.js</code> и заполните ключи.</div>';
       els.list.innerHTML = "";
       return;
     }
+    window.Auth.guard().then(function (user) {
+      if (!user) return; // не залогинен — guard уже перенаправил на login.html
+      userId = user.id;
+      init();
+    });
+  }
+
+  function init() {
     els.search.addEventListener("input", render);
     els.status.addEventListener("change", render);
     els.date.addEventListener("change", render);
@@ -37,6 +46,7 @@
     const { data, error } = await window.sb
       .from("orders")
       .select("*")
+      .eq("user_id", userId)
       .order("created_at", { ascending: false });
     if (error) {
       els.list.innerHTML = '<div class="msg msg-error">Не удалось загрузить заказы: ' + esc(error.message) + "</div>";

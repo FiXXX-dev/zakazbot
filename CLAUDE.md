@@ -30,8 +30,11 @@ GPT-4o-mini выделяет позиции → менеджер правит т
 | `index.html` + `js/orders.js` | Входящие заказы: поиск, фильтры (статус, сегодня/всё время), смена статуса, Excel, удаление |
 | `new-order.html` + `js/new-order.js` | Распознавание аудио/текста, редактируемая таблица позиций, Excel, сохранение |
 | `clients.html` + `js/clients.js` | Клиенты: поиск, история заказов, стандартный заказ («как обычно») |
-| `admin.html` + `js/admin.js` | Админ: импорт товаров и клиентов из .csv/.xlsx (SheetJS) в `products` / `clients` |
+| `admin.html` + `js/admin.js` | Импорт товаров и клиентов из .csv/.xlsx (SheetJS) в `products` / `clients` (на текущего пользователя) |
+| `login.html` + `js/login.js` | Вход/регистрация через Supabase Auth (email/пароль) |
+| `dashboard.html` + `js/dashboard.js` | Админ-панель владельца: все подписки, статистика, управление планом/статусом. Доступ только `CONFIG.ADMIN_EMAIL` |
 | `js/supabase-client.js` | Создаёт `window.sb` (клиент Supabase) |
+| `js/auth.js` | `window.Auth` — гард доступа (`guard()`/`guard({admin:true})`), редирект на login, инъекция «Выйти» в шапку, `isAdmin()` |
 | `js/dictionary.js` | `window.ZakazDictionary` — словарь (числительные, единицы, исправления, маркеры самоисправлений, имена сотрудников `managerNames`), оба алфавита. ДАННЫЕ, пополняется без правки кода |
 | `js/normalize.js` | `window.Normalizer.normalizeTranscript()` — этап между Whisper и GPT |
 | `js/client-detect.js` | `window.ClientDetect.pickClient()` — выбор клиента из нескольких имён (база/приветствия/сотрудники). Чистая логика, тесты в `tests/` |
@@ -90,6 +93,15 @@ GPT-4o-mini выделяет позиции → менеджер правит т
    среди равных предпочитается не приветственное. Чистую логику покрывают
    тесты `tests/client-detect.test.js` — менять её синхронно с ними.
 
+9. **Доступ и мультиарендность.** Страницы index/new-order/clients/admin/dashboard
+   защищены: в начале — `window.Auth.guard()` (dashboard — `guard({admin:true})`),
+   логика страницы запускается только при наличии пользователя. Все строки
+   принадлежат `user_id`; на чтениях фильтруем `.eq("user_id", userId)`, на
+   вставках проставляем `user_id`. Реальное разделение обеспечивают RLS
+   (`user_id = auth.uid()`), а не только фронтенд. Админ (`CONFIG.ADMIN_EMAIL`
+   = email в `is_admin()` в SQL) видит всё. `login.html` НЕ подключает `auth.js`
+   (иначе цикл редиректов).
+
 ## Данные
 
 ```
@@ -100,7 +112,12 @@ products:   id uuid, created_at, name, unit, price   (справочник, им
 order_logs: id uuid, created_at, order_id, client_name, source, audio_url,
             transcript_raw, transcript_normalized, corrections jsonb,
             had_self_correction, items jsonb   (логи распознавания для обучения)
+subscriptions: id uuid, user_id (uniq), client_name, status ('active'|'expired'),
+            plan ('basic'|'standard'|'business'), created_at
 ```
+
+У `orders`/`clients`/`products`/`order_logs` есть `user_id` (владелец строки).
+RLS: пользователь видит свои строки, админ (`is_admin()`) — все.
 
 Элемент `items` / `standard_order`:
 `{ name, qty: number|null, unit, price: number|null, confidence: "high"|"medium"|"low",

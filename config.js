@@ -15,6 +15,11 @@ window.CONFIG = {
 
   // Имя Edge Function-прокси — должно совпадать с именем функции в дашборде Supabase.
   EDGE_FUNCTION_NAME: "openaiproxy",
+
+  // Email администратора: видит dashboard.html (все подписки) и все данные.
+  // Должен совпадать с email в функции is_admin() в sql/schema.sql.
+  ADMIN_EMAIL: "nurmuhamedovsa@gmail.com",
+
   // Заполняется ТОЛЬКО для OPENAI_MODE="direct" при локальной отладке.
   // Никогда не публикуйте файл с заполненным ключом.
   OPENAI_API_KEY: ""
