@@ -42,6 +42,7 @@
   let items = [];          // модель таблицы: [{ name, qty, unit, price, confidence, confidence_score, corrected, note }]
   let sourceText = "";     // нормализованный текст / расшифровка — сохраняется в orders.source_text
   let clientsCache = [];
+  let productsCache = [];  // каталог товаров (products) — для подстановки цен
   let lastSavedSignature = null; // защита от случайного двойного сохранения
   // Данные последнего распознавания — для логирования в order_logs при сохранении.
   let lastRecognition = null; // { rawTranscript, normalizedTranscript, corrections, hadSelfCorrection, audioFile, inputSource }
@@ -80,6 +81,7 @@
     els.clientName.addEventListener("change", autofillPhone);
 
     loadClients();
+    loadProducts();
   }
 
   function switchMode(next) {
@@ -107,6 +109,29 @@
       opt.value = c.name;
       els.clientsDatalist.appendChild(opt);
     });
+  }
+
+  // Каталог товаров — для подстановки цены по названию позиции (best-effort).
+  async function loadProducts() {
+    if (!window.sb) return;
+    const { data, error } = await window.sb.from("products").select("name, unit, price");
+    if (!error && data) productsCache = data;
+  }
+
+  // Подставляет цену из каталога для позиций без цены — только при однозначном
+  // совпадении названия (OrderMerge.matchProduct). Единицу не трогаем (могла
+  // быть распознана из речи). Мутирует и возвращает тот же массив.
+  function applyCatalogPrices(list) {
+    if (!window.OrderMerge || !productsCache.length) return list;
+    (list || []).forEach(function (it) {
+      if (it.price != null) return; // вписанную/распознанную цену не меняем
+      const p = window.OrderMerge.matchProduct(it.name, productsCache);
+      if (p && p.price != null && p.price !== "") {
+        it.price = Number(p.price);
+        it.note = it.note ? it.note + " · цена из каталога" : "цена из каталога";
+      }
+    });
+    return list;
   }
 
   function findClient(name) {
@@ -222,6 +247,21 @@
     const s = new Set();
     arr.forEach(function (n) { s.add(String(n).toLowerCase()); });
     return s;
+  }
+
+  // Краткое описание правок, внесённых в стандартный заказ («как обычно»).
+  function mergeSummary(changes) {
+    if (!changes || !changes.length) return "";
+    const upd = changes.filter(function (c) { return c.type === "updated"; });
+    const rem = changes.filter(function (c) { return c.type === "removed"; });
+    const amb = changes.filter(function (c) { return c.type === "ambiguous"; });
+    const parts = [];
+    if (upd.length) parts.push("обновлено — " + upd.map(function (c) {
+      return esc(c.name) + ": " + (c.from == null ? "?" : c.from) + "→" + (c.to == null ? "?" : c.to);
+    }).join(", "));
+    if (rem.length) parts.push("убрано — " + rem.map(function (c) { return esc(c.name); }).join(", "));
+    if (amb.length) parts.push("проверьте возможные дубли — " + amb.map(function (c) { return esc(c.name); }).join(", "));
+    return parts.length ? " (" + parts.join("; ") + ")" : "";
   }
 
   // Экранирует спецсимволы LIKE (% _ \) и оборачивает в %…% (поиск подстроки).
@@ -397,15 +437,20 @@
       if (note) flagsHtml.push(note);
     }
 
-    // «Как обычно» — подставляем стандартный заказ клиента из базы.
+    // «Как обычно» — берём стандартный заказ клиента из базы и применяем к нему
+    // услышанные изменения: совпавшие позиции обновляются (без дублей), qty=0
+    // убирает позицию, новые товары добавляются. Слияние — в OrderMerge.
     if (parsed.repeat_last_order) {
       if (found && standardOrder.length) {
         const stdItems = standardOrder.map(function (it) {
           return normalizeItem(Object.assign({}, it, { confidence: "high", note: "" }));
         });
-        newItems = stdItems.concat(newItems);
-        flagsHtml.push('<div class="msg msg-info">Клиент просит «как обычно» — подставлен стандартный заказ клиента «' +
-          esc(clientName) + "».</div>");
+        const merged = window.OrderMerge
+          ? window.OrderMerge.mergeStandardOrder(stdItems, newItems)
+          : { items: stdItems.concat(newItems), changes: [] };
+        newItems = merged.items;
+        flagsHtml.push('<div class="msg msg-info">Клиент просит «как обычно» — за основу взят стандартный заказ клиента «' +
+          esc(clientName) + "»" + mergeSummary(merged.changes) + ".</div>");
       } else if (found) {
         flagsHtml.push('<div class="msg msg-warn">Клиент «' + esc(clientName) +
           '» найден, но стандартный заказ у него не задан — задайте его на странице «Клиенты».</div>');
@@ -416,7 +461,7 @@
     }
 
     els.flags.innerHTML = flagsHtml.join(" ");
-    items = newItems;
+    items = applyCatalogPrices(newItems);
     renderItemsTable();
   }
 
