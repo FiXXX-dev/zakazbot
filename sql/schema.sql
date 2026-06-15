@@ -52,12 +52,15 @@ alter table public.products enable row level security;
 -- ВНИМАНИЕ: любой, у кого есть anon-ключ, может читать и менять данные.
 -- Для продакшена удалите эти политики и используйте блок с authenticated ниже.
 
+drop policy if exists "orders anon full access" on public.orders;
 create policy "orders anon full access" on public.orders
   for all to anon using (true) with check (true);
 
+drop policy if exists "clients anon full access" on public.clients;
 create policy "clients anon full access" on public.clients
   for all to anon using (true) with check (true);
 
+drop policy if exists "products anon full access" on public.products;
 create policy "products anon full access" on public.products
   for all to anon using (true) with check (true);
 
