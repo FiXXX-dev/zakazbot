@@ -4,7 +4,7 @@
 // Доступ только администратору (Auth.guard({ admin: true }) + RLS is_admin()).
 
 (function () {
-  const PLANS = { basic: "Basic", standard: "Standard", business: "Business" };
+  const PLANS = { basic: "Basic", pro: "Pro" };
   const STATUS = { active: "Активна", expired: "Истекла" };
 
   const els = {
@@ -107,6 +107,7 @@
           '<div class="order-client">' + esc(s.client_name || "Без названия") + "</div>" +
           '<div class="order-meta">Регистрация: ' + esc(fmtDate(s.created_at)) +
             " · план: " + esc(PLANS[s.plan] || s.plan) +
+            (s.expires_at ? " · до: " + esc(fmtDate(s.expires_at)) : "") +
             " · заказов: " + orders + "</div>" +
         "</div>" +
         '<span class="badge badge-' + (s.status === "active" ? "ready" : "urgent") + '">' +

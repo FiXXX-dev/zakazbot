@@ -35,7 +35,8 @@ MVP веб-приложения для менеджера поставщика H
 | `clients.html` | База клиентов: поиск, история заказов, стандартный заказ — подставляется, когда клиент говорит «как обычно» |
 | `admin.html` | Импорт товаров (`products`) и клиентов (`clients`) из .csv/.xlsx (для своего аккаунта) |
 | `login.html` | Вход и регистрация через Supabase Auth (email/пароль) |
-| `dashboard.html` | Админ-панель владельца: все подписки, статистика, управление планом/статусом (только для `ADMIN_EMAIL`) |
+| `dashboard.html` | Админ-панель владельца: все подписки, статистика, управление планом (basic/pro)/статусом (только для `ADMIN_EMAIL`) |
+| `settings.html` | Тариф пользователя: текущий план, сравнение Basic/Pro, заявка на Upgrade |
 
 ## Стек
 
@@ -167,6 +168,7 @@ juft=пар, qop=мешок, korobka=коробка, upakovka=упаковка).
 ├── admin.html              # Импорт товаров/клиентов
 ├── login.html              # Вход/регистрация (Supabase Auth)
 ├── dashboard.html          # Админ-панель: подписки и статистика
+├── settings.html           # Тариф пользователя (Basic/Pro)
 ├── config.example.js       # Шаблон конфигурации
 ├── config.js               # Конфигурация (в репозитории, только публичные значения)
 ├── css/
@@ -174,8 +176,11 @@ juft=пар, qop=мешок, korobka=коробка, upakovka=упаковка).
 ├── js/
 │   ├── supabase-client.js  # window.sb — клиент Supabase
 │   ├── auth.js             # window.Auth — гард доступа, login-редирект, is_admin
+│   ├── plan.js             # window.Plan — тарифы/лимиты (plan_limits), баннеры
 │   ├── login.js            # Логика login.html (вход/регистрация)
 │   ├── dashboard.js        # Логика dashboard.html (подписки, статистика)
+│   ├── settings.js         # Логика settings.html (тариф, upgrade)
+│   ├── analytics.js        # Графики Chart.js (вкладка «Аналитика», Pro)
 │   ├── dictionary.js       # Словарь нормализации + имена сотрудников (managerNames)
 │   ├── normalize.js        # normalizeTranscript() — этап между Whisper и GPT
 │   ├── client-detect.js    # pickClient() — выбор клиента из нескольких имён
