@@ -11,7 +11,7 @@ vm.runInContext(
   fs.readFileSync(path.join(__dirname, "..", "js", "order-merge.js"), "utf8"),
   sandbox
 );
-const { mergeStandardOrder, namesMatch } = sandbox.window.OrderMerge;
+const { mergeStandardOrder, namesMatch, matchProduct } = sandbox.window.OrderMerge;
 
 let passed = 0, failed = 0;
 function check(label, cond) {
@@ -83,6 +83,26 @@ check("повтор без изменений: 1 позиция, без дубл
 // 11. Удаление несуществующего товара — игнорируется, без пустых строк.
 m = mergeStandardOrder([ item("Салфетки", 10) ], [ item("вилки", 0) ]);
 check("удаление несуществующего игнорируется: 1 позиция", m.items.length === 1);
+
+// ── matchProduct: подстановка цены из каталога ──
+console.log("order-merge: matchProduct");
+var catalog = [
+  { name: "Вилки пластиковые", unit: "уп", price: 12000 },
+  { name: "Стаканы 200мл", unit: "уп", price: 8000 },
+  { name: "Салфетки бумажные", unit: "уп", price: 5000 }
+];
+check("однозначное совпадение → товар", (matchProduct("вилки пластиковые", catalog) || {}).price === 12000);
+check("уточнение слов («вилки») → товар", (matchProduct("вилки", catalog) || {}).price === 12000);
+check("нет совпадения → null", matchProduct("перчатки", catalog) === null);
+
+// Неоднозначность: два товара содержат «вилки» — цену не подставляем.
+var catalog2 = [
+  { name: "Вилки пластиковые", price: 12000 },
+  { name: "Вилки деревянные", price: 15000 }
+];
+check("неоднозначно (две «вилки») → null", matchProduct("вилки", catalog2) === null);
+check("уточнённое «вилки деревянные» → конкретный товар",
+  (matchProduct("вилки деревянные", catalog2) || {}).price === 15000);
 
 console.log("\n" + passed + " passed, " + failed + " failed");
 process.exit(failed ? 1 : 0);

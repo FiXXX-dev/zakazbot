@@ -42,6 +42,7 @@
   let items = [];          // модель таблицы: [{ name, qty, unit, price, confidence, confidence_score, corrected, note }]
   let sourceText = "";     // нормализованный текст / расшифровка — сохраняется в orders.source_text
   let clientsCache = [];
+  let productsCache = [];  // каталог товаров (products) — для подстановки цен
   let lastSavedSignature = null; // защита от случайного двойного сохранения
   // Данные последнего распознавания — для логирования в order_logs при сохранении.
   let lastRecognition = null; // { rawTranscript, normalizedTranscript, corrections, hadSelfCorrection, audioFile, inputSource }
@@ -80,6 +81,7 @@
     els.clientName.addEventListener("change", autofillPhone);
 
     loadClients();
+    loadProducts();
   }
 
   function switchMode(next) {
@@ -107,6 +109,29 @@
       opt.value = c.name;
       els.clientsDatalist.appendChild(opt);
     });
+  }
+
+  // Каталог товаров — для подстановки цены по названию позиции (best-effort).
+  async function loadProducts() {
+    if (!window.sb) return;
+    const { data, error } = await window.sb.from("products").select("name, unit, price");
+    if (!error && data) productsCache = data;
+  }
+
+  // Подставляет цену из каталога для позиций без цены — только при однозначном
+  // совпадении названия (OrderMerge.matchProduct). Единицу не трогаем (могла
+  // быть распознана из речи). Мутирует и возвращает тот же массив.
+  function applyCatalogPrices(list) {
+    if (!window.OrderMerge || !productsCache.length) return list;
+    (list || []).forEach(function (it) {
+      if (it.price != null) return; // вписанную/распознанную цену не меняем
+      const p = window.OrderMerge.matchProduct(it.name, productsCache);
+      if (p && p.price != null && p.price !== "") {
+        it.price = Number(p.price);
+        it.note = it.note ? it.note + " · цена из каталога" : "цена из каталога";
+      }
+    });
+    return list;
   }
 
   function findClient(name) {
@@ -436,7 +461,7 @@
     }
 
     els.flags.innerHTML = flagsHtml.join(" ");
-    items = newItems;
+    items = applyCatalogPrices(newItems);
     renderItemsTable();
   }
 
