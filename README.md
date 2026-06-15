@@ -33,7 +33,9 @@ MVP веб-приложения для менеджера поставщика H
 | `index.html` | Входящие заказы: статусы (new / processing / ready), поиск по клиенту, фильтр по статусу и дате (сегодня / всё время), смена статуса, скачивание Excel, удаление |
 | `new-order.html` | Создание заказа: аудио (.ogg/.mp3/.wav/.m4a) или текст → «Распознать заказ» → редактируемая таблица позиций (жёлтым — что нужно уточнить), клиент и телефон, Excel, сохранение |
 | `clients.html` | База клиентов: поиск, история заказов, стандартный заказ — подставляется, когда клиент говорит «как обычно» |
-| `admin.html` | Панель администратора: импорт товаров (таблица `products`) и клиентов (таблица `clients`) из файлов .csv/.xlsx |
+| `admin.html` | Импорт товаров (`products`) и клиентов (`clients`) из .csv/.xlsx (для своего аккаунта) |
+| `login.html` | Вход и регистрация через Supabase Auth (email/пароль) |
+| `dashboard.html` | Админ-панель владельца: все подписки, статистика, управление планом/статусом (только для `ADMIN_EMAIL`) |
 
 ## Стек
 
@@ -49,10 +51,14 @@ MVP веб-приложения для менеджера поставщика H
 
 1. Создайте проект на [supabase.com](https://supabase.com).
 2. **SQL Editor** → выполните содержимое `sql/schema.sql`
-   (таблицы `orders`, `clients`, `products`, `order_logs`, бакет `order-audio`
-   для логов распознавания + открытые RLS-политики для MVP). Скрипт идемпотентен —
-   можно перезапускать; без него приём заказов работает, но логи не пишутся.
-3. Установите [Supabase CLI](https://supabase.com/docs/guides/cli) и
+   (таблицы `orders`, `clients`, `products`, `order_logs`, `subscriptions`,
+   бакет `order-audio`, RLS по `user_id` + админ). Скрипт идемпотентен.
+3. **Authentication → Providers → Email** — включите. Для мгновенного входа без
+   письма временно выключите «Confirm email». В `config.js` и в функции
+   `is_admin()` (в `sql/schema.sql`) укажите **один и тот же** `ADMIN_EMAIL`.
+   После первого входа привяжите старые данные к своему аккаунту — см. блок
+   «миграция существующих данных» в `sql/schema.sql` (`update … set user_id = …`).
+4. Установите [Supabase CLI](https://supabase.com/docs/guides/cli) и
    задеплойте Edge Function с ключом OpenAI:
 
    ```bash
@@ -158,13 +164,18 @@ juft=пар, qop=мешок, korobka=коробка, upakovka=упаковка).
 ├── index.html              # Входящие заказы
 ├── new-order.html          # Создание заказа
 ├── clients.html            # База клиентов
-├── admin.html              # Панель администратора (импорт товаров/клиентов)
+├── admin.html              # Импорт товаров/клиентов
+├── login.html              # Вход/регистрация (Supabase Auth)
+├── dashboard.html          # Админ-панель: подписки и статистика
 ├── config.example.js       # Шаблон конфигурации
 ├── config.js               # Конфигурация (в репозитории, только публичные значения)
 ├── css/
 │   └── style.css
 ├── js/
 │   ├── supabase-client.js  # window.sb — клиент Supabase
+│   ├── auth.js             # window.Auth — гард доступа, login-редирект, is_admin
+│   ├── login.js            # Логика login.html (вход/регистрация)
+│   ├── dashboard.js        # Логика dashboard.html (подписки, статистика)
 │   ├── dictionary.js       # Словарь нормализации + имена сотрудников (managerNames)
 │   ├── normalize.js        # normalizeTranscript() — этап между Whisper и GPT
 │   ├── client-detect.js    # pickClient() — выбор клиента из нескольких имён
