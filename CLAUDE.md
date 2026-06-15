@@ -31,11 +31,10 @@ GPT-4o-mini выделяет позиции → менеджер правит т
 | `new-order.html` + `js/new-order.js` | Распознавание аудио/текста, редактируемая таблица позиций, Excel, сохранение |
 | `clients.html` + `js/clients.js` | Клиенты: поиск, история заказов, стандартный заказ («как обычно») |
 | `admin.html` + `js/admin.js` | Импорт товаров и клиентов из .csv/.xlsx (SheetJS) в `products` / `clients` (на текущего пользователя) |
-| `login.html` + `js/login.js` | Вход/регистрация через Supabase Auth (email/пароль) |
-| `dashboard.html` + `js/dashboard.js` | Админ-панель владельца: все подписки, статистика, управление планом (basic/pro)/статусом. Доступ только `CONFIG.ADMIN_EMAIL` |
-| `settings.html` + `js/settings.js` | Тариф пользователя: текущий план/даты, сравнение Basic/Pro, заявка на Upgrade (письмо админу) |
+| `admin-dashboard.html` + `js/admin-dashboard.js` | Админка владельца: создание клиентов, выдача ACCESS_KEY (+копировать), управление планом/статусом. Пароль проверяет `clientauth` (секрет `ADMIN_PANEL_SECRET`), не в репозитории |
+| `settings.html` + `js/settings.js` | Тариф клиента: текущий план/даты, сравнение Basic/Pro, заявка на Upgrade (письмо админу) |
 | `js/supabase-client.js` | Создаёт `window.sb` (клиент Supabase) |
-| `js/auth.js` | `window.Auth` — гард доступа (`guard()`/`guard({admin:true})`), редирект на login, инъекция «Выйти»/«Тариф» в шапку, `isAdmin()`. Гард сам грузит `Plan` и рисует баннеры лимитов |
+| `js/auth.js` | `window.Auth` — вход клиента по ACCESS_KEY (`keyLogin`/`guard`): нет сессии → форма ключа вместо контента; инъекция «Тариф»/«Выйти». Гард грузит `Plan` и рисует баннеры |
 | `js/plan.js` | `window.Plan` — загрузка подписки + `plan_limits` (фичефлаги/лимиты), `isPro()`, `has(feature)`, баннеры лимитов |
 | `js/analytics.js` | `window.Analytics.render()` — графики (Chart.js) на вкладке «Аналитика» (только Pro) |
 | `js/dictionary.js` | `window.ZakazDictionary` — словарь (числительные, единицы, исправления, маркеры самоисправлений, имена сотрудников `managerNames`), оба алфавита. ДАННЫЕ, пополняется без правки кода |
@@ -47,6 +46,7 @@ GPT-4o-mini выделяет позиции → менеджер правит т
 | `js/openai.js` | Whisper + GPT-4o-mini, режимы edge/direct, системный промпт |
 | `js/excel.js` | `window.ExcelUtils.downloadOrderExcel(order)` — выгрузка XLSX |
 | `supabase/functions/openaiproxy/index.ts` | Edge Function — прокси к OpenAI |
+| `supabase/functions/clientauth/index.ts` | Edge Function (service-role) — вход по ACCESS_KEY и админ-операции (создание/список/обновление клиентов) |
 | `sql/schema.sql` | Таблицы `orders`, `clients`, `products`, `order_logs` + бакет `order-audio` + RLS |
 | `config.js` | Конфигурация (хранится в репозитории: только публичные значения, ключ OpenAI — никогда) |
 
@@ -96,14 +96,14 @@ GPT-4o-mini выделяет позиции → менеджер правит т
    среди равных предпочитается не приветственное. Чистую логику покрывают
    тесты `tests/client-detect.test.js` — менять её синхронно с ними.
 
-9. **Доступ и мультиарендность.** Страницы index/new-order/clients/admin/dashboard/settings
-   защищены: в начале — `window.Auth.guard()` (dashboard — `guard({admin:true})`),
-   логика страницы запускается только при наличии пользователя. Все строки
-   принадлежат `user_id`; на чтениях фильтруем `.eq("user_id", userId)`, на
-   вставках проставляем `user_id`. Реальное разделение обеспечивают RLS
-   (`user_id = auth.uid()`), а не только фронтенд. Админ (`CONFIG.ADMIN_EMAIL`
-   = email в `is_admin()` в SQL) видит всё. `login.html` НЕ подключает `auth.js`
-   (иначе цикл редиректов).
+9. **Доступ по ACCESS_KEY (без регистрации).** Клиент = пользователь Supabase
+   Auth (синтетический email, пароль = ключ). `Auth.guard()` на
+   index/new-order/clients/admin/settings: нет сессии → форма ключа вместо
+   контента. Ключ меняется на сессию через Edge Function `clientauth`
+   (service-role); `clients_accounts` закрыта RLS и публично не читается.
+   Данные изолируют RLS по `user_id = auth.uid()` + фильтр `.eq("user_id", …)`.
+   Аккаунты создаёт владелец в `admin-dashboard.html` (пароль — серверный секрет
+   `ADMIN_PANEL_SECRET`, НЕ в config.js). Регистрации/`login.html` больше нет.
 
 10. **Тарифы (basic/pro).** Лимиты и фичи — в `plan_limits` (`js/plan.js`).
     Баннеры лимитов рисует `Auth.guard()` → `Plan.renderBanners()` на страницах,
@@ -125,6 +125,9 @@ subscriptions: id uuid, user_id (uniq), client_name, status ('active'|'expired')
             plan ('basic'|'pro'), created_at, expires_at
 plan_limits: plan (pk 'basic'|'pro'), max_products, max_clients (NULL=безлимит),
             has_analytics, has_1c_integration, has_priority_support, has_custom_branding
+clients_accounts: id uuid, company_name, email, access_key (uniq, 16 симв.),
+            plan, status ('active'|'inactive'), user_id, auth_email, created_at
+            (закрыта RLS; читает только service role в clientauth)
 ```
 
 У `orders`/`clients`/`products`/`order_logs` есть `user_id` (владелец строки).
