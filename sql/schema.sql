@@ -272,3 +272,28 @@ create policy "order-audio auth read" on storage.objects
   for select to authenticated using (bucket_id = 'order-audio');
 create policy "order-audio auth insert" on storage.objects
   for insert to authenticated with check (bucket_id = 'order-audio');
+
+-- ═══════════════════════════════════════════════════════════════════
+-- Аккаунты клиентов и вход по ACCESS_KEY (через Edge Function clientauth)
+-- ═══════════════════════════════════════════════════════════════════
+-- Клиент = один пользователь Supabase Auth (синтетический email, пароль =
+-- access_key). Создаёт и проверяет их Edge Function clientauth на service-role.
+-- ВАЖНО: clients_accounts закрыта RLS без политик — её читает ТОЛЬКО service
+-- role внутри функции. Публичный anon-ключ НЕ должен видеть ключи доступа.
+
+create table if not exists public.clients_accounts (
+  id           uuid primary key default gen_random_uuid(),
+  company_name text not null,
+  email        text,                       -- опционально, для уведомлений
+  access_key   text not null unique,       -- 16 символов, выдаётся клиенту
+  plan         text not null default 'basic'  check (plan in ('basic', 'pro')),
+  status       text not null default 'active' check (status in ('active', 'inactive')),
+  user_id      uuid references auth.users(id) on delete cascade,
+  auth_email   text,                        -- синтетический email auth-пользователя
+  created_at   timestamptz not null default now()
+);
+create index if not exists clients_accounts_key_idx on public.clients_accounts (access_key);
+
+-- RLS включён, политик нет → ни anon, ни authenticated не имеют доступа.
+-- Доступ только у service role (Edge Function), который обходит RLS.
+alter table public.clients_accounts enable row level security;
