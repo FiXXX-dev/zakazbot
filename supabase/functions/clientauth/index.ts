@@ -86,9 +86,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (action === "admin_list") {
       const { data, error } = await svc
         .from("clients_accounts")
-        .select("id, company_name, email, access_key, plan, status, created_at")
+        .select("id, company_name, email, access_key, plan, status, created_at, customer_code")
         .order("created_at", { ascending: false });
       if (error) return json({ error: error.message }, 500);
+      // Бэкфилл кода приглашения для старых аккаунтов.
+      for (const row of data ?? []) {
+        if (!row.customer_code) {
+          const code = genKey(10);
+          await svc.from("clients_accounts").update({ customer_code: code }).eq("id", row.id);
+          row.customer_code = code;
+        }
+      }
       return json({ clients: data ?? [] });
     }
 
@@ -112,6 +120,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
       const { error: iErr } = await svc.from("clients_accounts").insert({
         company_name: company, email, access_key, plan, status: "active", user_id, auth_email,
+        customer_code: genKey(10),
       });
       if (iErr) return json({ error: iErr.message }, 500);
 

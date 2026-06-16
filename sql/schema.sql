@@ -293,8 +293,15 @@ create table if not exists public.clients_accounts (
   status       text not null default 'active' check (status in ('active', 'inactive')),
   user_id      uuid references auth.users(id) on delete cascade,
   auth_email   text,                        -- синтетический email auth-пользователя
+  customer_code text unique,                -- код для ссылки-приглашения клиентов в ТГ
   created_at   timestamptz not null default now()
 );
+alter table public.clients_accounts add column if not exists customer_code text;
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'clients_accounts_customer_code_key') then
+    alter table public.clients_accounts add constraint clients_accounts_customer_code_key unique (customer_code);
+  end if;
+end $$;
 create index if not exists clients_accounts_key_idx on public.clients_accounts (access_key);
 
 -- RLS включён, политик нет → ни anon, ни authenticated не имеют доступа.
@@ -309,7 +316,11 @@ create table if not exists public.telegram_links (
   chat_id       bigint primary key,
   user_id       uuid references auth.users(id) on delete cascade,
   company_name  text,
+  role          text not null default 'manager',  -- 'manager' | 'customer'
+  client_name   text,                              -- название кафе (для роли customer)
   pending_order jsonb,
   created_at    timestamptz not null default now()
 );
+alter table public.telegram_links add column if not exists role text not null default 'manager';
+alter table public.telegram_links add column if not exists client_name text;
 alter table public.telegram_links enable row level security;

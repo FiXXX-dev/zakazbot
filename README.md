@@ -178,7 +178,15 @@ Edge Function `tgbot` принимает заказы прямо в Telegram: г
    curl "https://api.telegram.org/bot<ТОКЕН>/setWebhook?url=<SUPABASE_URL>/functions/v1/tgbot&secret_token=<TELEGRAM_WEBHOOK_SECRET>"
    ```
 4. В боте: `/start` → прислать **ACCESS_KEY** (из `admin-dashboard.html`) → чат
-   привязан. Дальше шлите голосовое/текст — бот вернёт разобранный заказ.
+   привязан как **менеджер**. Дальше шлите голосовое/текст — бот вернёт
+   разобранный заказ с CSV-файлом и кнопкой «Сохранить». «как обычно»
+   подставляет стандартный заказ клиента + цены из каталога.
+
+**Клиенты напрямую (кафе):** в `admin-dashboard.html` у каждого клиента есть
+ссылка‑приглашение `t.me/<бот>?start=<код>` (`TELEGRAM_BOT_USERNAME` в config.js).
+Кафе открывает её, вводит название заведения — и его заказы (голос/текст)
+после подтверждения **улетают чату менеджера** с готовым CSV. Роль чата
+(`manager`/`customer`) хранится в `telegram_links`.
 
 Нормализация в боте — порт `js/normalize.js`+`js/dictionary.js` в
 `supabase/functions/tgbot/normalize.ts`; системный промпт совпадает с
