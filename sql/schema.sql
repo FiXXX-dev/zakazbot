@@ -318,9 +318,11 @@ create table if not exists public.telegram_links (
   company_name  text,
   role          text not null default 'manager',  -- 'manager' | 'customer'
   client_name   text,                              -- название кафе (для роли customer)
+  file_format   text not null default 'xlsx',      -- 'xlsx' | 'csv'
   pending_order jsonb,
   created_at    timestamptz not null default now()
 );
 alter table public.telegram_links add column if not exists role text not null default 'manager';
 alter table public.telegram_links add column if not exists client_name text;
+alter table public.telegram_links add column if not exists file_format text not null default 'xlsx';
 alter table public.telegram_links enable row level security;
