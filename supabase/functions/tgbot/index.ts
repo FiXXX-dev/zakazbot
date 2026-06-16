@@ -223,6 +223,82 @@ async function onCallback(cb: any) {
   }
 }
 
+// Постоянная клавиатура с основными действиями.
+function mainKeyboard() {
+  return {
+    keyboard: [["📦 Мои заказы", "👤 Мой аккаунт"], ["ℹ️ Помощь", "🚪 Выйти"]],
+    resize_keyboard: true,
+    is_persistent: true,
+  };
+}
+
+// Текст кнопки/команды → действие.
+function cmdOf(text: string): string | null {
+  const t = (text || "").trim();
+  if (t === "/start") return "start";
+  if (t === "/logout" || t === "🚪 Выйти") return "logout";
+  if (t === "/help" || t === "ℹ️ Помощь") return "help";
+  if (t === "/account" || t === "/status" || t === "👤 Мой аккаунт") return "account";
+  if (t === "/orders" || t === "📦 Мои заказы") return "orders";
+  return null;
+}
+
+async function setCommands() {
+  await tg("setMyCommands", { commands: [
+    { command: "start", description: "Войти / меню" },
+    { command: "orders", description: "Мои последние заказы" },
+    { command: "account", description: "Мой тариф" },
+    { command: "logout", description: "Выйти из аккаунта" },
+    { command: "help", description: "Помощь" },
+  ] });
+}
+
+async function doLogout(chatId: number) {
+  await svc().from("telegram_links").delete().eq("chat_id", chatId);
+  await tg("sendMessage", {
+    chat_id: chatId,
+    text: "Вы вышли из аккаунта. Пришлите ключ доступа, чтобы войти снова.",
+    reply_markup: { remove_keyboard: true },
+  });
+}
+
+async function doHelp(chatId: number) {
+  await tg("sendMessage", {
+    chat_id: chatId,
+    text: "Пришлите голосовое сообщение или текст заказа — я разберу его в позиции и предложу сохранить (кнопки ✅/✖ под заказом).\n\nМеню:\n📦 Мои заказы — последние 5\n👤 Мой аккаунт — тариф и статус\n🚪 Выйти — отвязать этот чат",
+    reply_markup: mainKeyboard(),
+  });
+}
+
+// deno-lint-ignore no-explicit-any
+async function doAccount(chatId: number, link: any) {
+  const sub = await svc().from("subscriptions").select("plan,status").eq("user_id", link.user_id).maybeSingle();
+  const plan = sub.data && sub.data.plan === "pro" ? "Pro" : "Basic";
+  const st = sub.data && sub.data.status === "active" ? "активна" : (sub.data ? "истекла" : "—");
+  await tg("sendMessage", {
+    chat_id: chatId,
+    text: `👤 ${link.company_name}\nТариф: ${plan}\nПодписка: ${st}`,
+    reply_markup: mainKeyboard(),
+  });
+}
+
+// deno-lint-ignore no-explicit-any
+async function doOrders(chatId: number, link: any) {
+  const { data } = await svc().from("orders")
+    .select("created_at, client_name, items").eq("user_id", link.user_id)
+    .order("created_at", { ascending: false }).limit(5);
+  if (!data || !data.length) {
+    await tg("sendMessage", { chat_id: chatId, text: "Заказов пока нет.", reply_markup: mainKeyboard() });
+    return;
+  }
+  const lines = data.map((o: { created_at: string; client_name: string | null; items: unknown }, i: number) => {
+    const d = new Date(o.created_at).toLocaleDateString("ru-RU");
+    const n = Array.isArray(o.items) ? o.items.length : 0;
+    return `${i + 1}. ${d} — ${o.client_name || "—"} — ${n} поз.`;
+  });
+  await tg("sendMessage", { chat_id: chatId, text: "📦 Последние заказы:\n" + lines.join("\n"), reply_markup: mainKeyboard() });
+}
+
 // deno-lint-ignore no-explicit-any
 async function handle(update: any) {
   if (update.callback_query) return await onCallback(update.callback_query);
@@ -254,17 +330,14 @@ async function handle(update: any) {
     await svc().from("telegram_links").upsert({
       chat_id: chatId, user_id: acct.data.user_id, company_name: acct.data.company_name, pending_order: null,
     }, { onConflict: "chat_id" });
+    await setCommands();
     await tg("sendMessage", { chat_id: chatId, text:
-      `Готово ✅ Чат привязан к «${acct.data.company_name}».\n\nПрисылайте голосовое сообщение или текст заказа — я разберу его в позиции.` });
+      `Готово ✅ Чат привязан к «${acct.data.company_name}».\n\nПрисылайте голосовое сообщение или текст заказа — я разберу его в позиции.`,
+      reply_markup: mainKeyboard() });
     return;
   }
 
   // ── Привязан ──
-  if (text === "/start") {
-    await tg("sendMessage", { chat_id: chatId, text:
-      `Вы вошли как «${link.company_name}». Пришлите голосовое или текст заказа.` });
-    return;
-  }
   if (msg.voice || msg.audio) {
     await tg("sendChatAction", { chat_id: chatId, action: "typing" });
     const fileId = (msg.voice || msg.audio).file_id;
@@ -275,12 +348,23 @@ async function handle(update: any) {
     await processOrderText(chatId, link, rawText);
     return;
   }
+  switch (cmdOf(text)) {
+    case "start":
+      await setCommands();
+      await tg("sendMessage", { chat_id: chatId, text:
+        `Вы вошли как «${link.company_name}». Пришлите голосовое или текст заказа.`, reply_markup: mainKeyboard() });
+      return;
+    case "logout": await doLogout(chatId); return;
+    case "help": await doHelp(chatId); return;
+    case "account": await doAccount(chatId, link); return;
+    case "orders": await doOrders(chatId, link); return;
+  }
   if (text && !text.startsWith("/")) {
     await tg("sendChatAction", { chat_id: chatId, action: "typing" });
     await processOrderText(chatId, link, text);
     return;
   }
-  await tg("sendMessage", { chat_id: chatId, text: "Пришлите голосовое сообщение или текст заказа." });
+  await tg("sendMessage", { chat_id: chatId, text: "Пришлите голосовое сообщение или текст заказа.", reply_markup: mainKeyboard() });
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
