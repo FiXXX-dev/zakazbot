@@ -13,6 +13,7 @@
 // изменения вносить во все три синхронно.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import * as XLSX from "https://esm.sh/xlsx@0.20.3";
 import { normalizeTranscript } from "./normalize.ts";
 import { mergeStandardOrder, matchProduct, pickClient, MANAGER_NAMES } from "./order-logic.ts";
 
@@ -164,15 +165,46 @@ async function getLink(chatId: number): Promise<any> {
   return data;
 }
 
-// Отправка файла (CSV) документом в Telegram (multipart).
-async function tgDocument(chatId: number, filename: string, content: string, caption: string, replyMarkup: unknown) {
+// Отправка файла документом в Telegram (multipart).
+async function tgDocument(chatId: number, filename: string, blob: Blob, caption: string, replyMarkup: unknown) {
   const fd = new FormData();
   fd.append("chat_id", String(chatId));
-  fd.append("document", new Blob(["\uFEFF" + content], { type: "text/csv" }), filename);
+  fd.append("document", blob, filename);
   if (caption) fd.append("caption", caption);
   if (replyMarkup) fd.append("reply_markup", JSON.stringify(replyMarkup));
   const r = await fetch(`${TG_API}/sendDocument`, { method: "POST", body: fd });
   return await r.json();
+}
+
+// deno-lint-ignore no-explicit-any
+function buildXlsx(items: any[]): Uint8Array {
+  // deno-lint-ignore no-explicit-any
+  const rows: any[][] = [["№", "Наименование", "Количество", "Ед.изм.", "Цена", "Сумма"]];
+  let total = 0;
+  items.forEach((it, i) => {
+    const sum = it.qty != null && it.price != null ? it.qty * it.price : "";
+    if (typeof sum === "number") total += sum;
+    rows.push([i + 1, it.name || "", it.qty == null ? "" : it.qty, it.unit || "", it.price == null ? "" : it.price, sum]);
+  });
+  rows.push(["", "Итого", "", "", "", total]);
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws["!cols"] = [{ wch: 5 }, { wch: 42 }, { wch: 12 }, { wch: 9 }, { wch: 12 }, { wch: 14 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Заказ");
+  return new Uint8Array(XLSX.write(wb, { bookType: "xlsx", type: "array" }));
+}
+
+// Готовит файл заказа в нужном формате → { filename, blob }.
+// deno-lint-ignore no-explicit-any
+function buildOrderFile(format: string, clientName: string, items: any[]): { filename: string; blob: Blob } {
+  const base = "Заказ_" + String(clientName || "клиент").replace(/[^\p{L}\p{N}]+/gu, "_");
+  if (format === "csv") {
+    return { filename: base + ".csv", blob: new Blob(["﻿" + buildCsv(items)], { type: "text/csv" }) };
+  }
+  return {
+    filename: base + ".xlsx",
+    blob: new Blob([buildXlsx(items)], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+  };
 }
 
 function csvCell(v: unknown): string {
@@ -295,8 +327,8 @@ async function processOrderText(chatId: number, link: any, rawText: string) {
 
   let caption = formatOrder({ ...parsed, client_name: chosenName }, items, norm);
   if (note) caption += "\n" + note;
-  const fname = "Заказ_" + (chosenName || "клиент").replace(/[^\p{L}\p{N}]+/gu, "_") + ".csv";
-  await tgDocument(chatId, fname, buildCsv(items), caption.slice(0, 1000), {
+  const file = buildOrderFile(link.file_format || "xlsx", chosenName, items);
+  await tgDocument(chatId, file.filename, file.blob, caption.slice(0, 1000), {
     inline_keyboard: [[{ text: "✅ Сохранить", callback_data: "save" }, { text: "✖ Отмена", callback_data: "cancel" }]],
   });
 }
@@ -310,14 +342,13 @@ function pendingSummary(pending: any): string {
 // Пересылает заказ клиента всем чатам-менеджерам этого поставщика (CSV + сводка).
 // deno-lint-ignore no-explicit-any
 async function forwardToManagers(supplier: string, pending: any): Promise<number> {
-  const { data } = await svc().from("telegram_links").select("chat_id").eq("user_id", supplier).eq("role", "manager");
+  const { data } = await svc().from("telegram_links").select("chat_id, file_format").eq("user_id", supplier).eq("role", "manager");
   if (!data || !data.length) return 0;
   const cafe = pending.client_name || "клиент";
   const caption = (`🆕 Новый заказ от «${cafe}»\n` + pendingSummary(pending)).slice(0, 1000);
-  const fname = "Заказ_" + String(cafe).replace(/[^\p{L}\p{N}]+/gu, "_") + ".csv";
-  const csv = buildCsv(pending.items || []);
   for (const m of data) {
-    await tgDocument(m.chat_id, fname, csv, caption, null);
+    const file = buildOrderFile(m.file_format || "xlsx", cafe, pending.items || []);
+    await tgDocument(m.chat_id, file.filename, file.blob, caption, null);
   }
   return data.length;
 }
@@ -377,7 +408,7 @@ async function onCallback(cb: any) {
 // Постоянная клавиатура с основными действиями (менеджер).
 function mainKeyboard() {
   return {
-    keyboard: [["📦 Мои заказы", "👤 Мой аккаунт"], ["ℹ️ Помощь", "🚪 Выйти"]],
+    keyboard: [["📦 Мои заказы", "👤 Мой аккаунт"], ["📄 Формат файла", "ℹ️ Помощь"], ["🚪 Выйти"]],
     resize_keyboard: true,
     is_persistent: true,
   };
@@ -396,6 +427,7 @@ function cmdOf(text: string): string | null {
   if (t === "/help" || t === "ℹ️ Помощь") return "help";
   if (t === "/account" || t === "/status" || t === "👤 Мой аккаунт") return "account";
   if (t === "/orders" || t === "📦 Мои заказы") return "orders";
+  if (t === "/format" || t === "📄 Формат файла") return "format";
   return null;
 }
 
@@ -404,9 +436,18 @@ async function setCommands() {
     { command: "start", description: "Войти / меню" },
     { command: "orders", description: "Мои последние заказы" },
     { command: "account", description: "Мой тариф" },
+    { command: "format", description: "Формат файла: Excel/CSV" },
     { command: "logout", description: "Выйти из аккаунта" },
     { command: "help", description: "Помощь" },
   ] });
+}
+
+// deno-lint-ignore no-explicit-any
+async function doFormat(chatId: number, link: any) {
+  const next = link.file_format === "csv" ? "xlsx" : "csv";
+  await svc().from("telegram_links").update({ file_format: next }).eq("chat_id", chatId);
+  const label = next === "csv" ? "CSV" : "Excel (.xlsx)";
+  await tg("sendMessage", { chat_id: chatId, text: `Формат файла заказов: ${label}. Нажмите ещё раз, чтобы переключить.`, reply_markup: mainKeyboard() });
 }
 
 async function doLogout(chatId: number) {
@@ -552,6 +593,7 @@ async function handle(update: any) {
     case "help": await doHelp(chatId, link); return;
     case "account": if (link.role !== "customer") { await doAccount(chatId, link); return; } break;
     case "orders": if (link.role !== "customer") { await doOrders(chatId, link); return; } break;
+    case "format": if (link.role !== "customer") { await doFormat(chatId, link); return; } break;
   }
   if (text && !text.startsWith("/")) {
     await tg("sendChatAction", { chat_id: chatId, action: "typing" });
