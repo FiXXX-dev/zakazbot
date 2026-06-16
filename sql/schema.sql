@@ -300,3 +300,16 @@ create index if not exists clients_accounts_key_idx on public.clients_accounts (
 -- RLS включён, политик нет → ни anon, ни authenticated не имеют доступа.
 -- Доступ только у service role (Edge Function), который обходит RLS.
 alter table public.clients_accounts enable row level security;
+
+-- ─── Telegram-бот: привязка чата к аккаунту ─────────────────────────
+-- Менеджер (или клиент) привязывает свой Telegram-чат к аккаунту по ACCESS_KEY.
+-- pending_order — заказ, ожидающий подтверждения кнопкой. Доступ — только
+-- service role (Edge Function tgbot).
+create table if not exists public.telegram_links (
+  chat_id       bigint primary key,
+  user_id       uuid references auth.users(id) on delete cascade,
+  company_name  text,
+  pending_order jsonb,
+  created_at    timestamptz not null default now()
+);
+alter table public.telegram_links enable row level security;
