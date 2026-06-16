@@ -14,6 +14,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { normalizeTranscript } from "./normalize.ts";
+import { mergeStandardOrder, matchProduct, pickClient, MANAGER_NAMES } from "./order-logic.ts";
 
 const TG_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
 const WEBHOOK_SECRET = Deno.env.get("TELEGRAM_WEBHOOK_SECRET") ?? "";
@@ -163,6 +164,62 @@ async function getLink(chatId: number): Promise<any> {
   return data;
 }
 
+// Отправка файла (CSV) документом в Telegram (multipart).
+async function tgDocument(chatId: number, filename: string, content: string, caption: string, replyMarkup: unknown) {
+  const fd = new FormData();
+  fd.append("chat_id", String(chatId));
+  fd.append("document", new Blob(["\uFEFF" + content], { type: "text/csv" }), filename);
+  if (caption) fd.append("caption", caption);
+  if (replyMarkup) fd.append("reply_markup", JSON.stringify(replyMarkup));
+  const r = await fetch(`${TG_API}/sendDocument`, { method: "POST", body: fd });
+  return await r.json();
+}
+
+function csvCell(v: unknown): string {
+  const s = String(v == null ? "" : v);
+  return /[;"\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+// deno-lint-ignore no-explicit-any
+function buildCsv(items: any[]): string {
+  const rows: string[][] = [["№", "Наименование", "Количество", "Ед.изм.", "Цена", "Сумма"]];
+  let total = 0;
+  items.forEach((it, i) => {
+    const sum = it.qty != null && it.price != null ? it.qty * it.price : "";
+    if (typeof sum === "number") total += sum;
+    rows.push([String(i + 1), it.name || "", it.qty == null ? "" : String(it.qty),
+      it.unit || "", it.price == null ? "" : String(it.price), sum === "" ? "" : String(sum)]);
+  });
+  rows.push(["", "Итого", "", "", "", String(total)]);
+  return rows.map((r) => r.map(csvCell).join(";")).join("\r\n");
+}
+
+// deno-lint-ignore no-explicit-any
+function stdItem(it: any) {
+  return {
+    name: it && it.name ? String(it.name) : "",
+    qty: it && it.qty != null && it.qty !== "" && !isNaN(Number(it.qty)) ? Number(it.qty) : null,
+    unit: it && it.unit ? String(it.unit) : "шт",
+    price: it && it.price != null && it.price !== "" && !isNaN(Number(it.price)) ? Number(it.price) : null,
+    confidence: "high", confidence_score: 90, corrected: false, note: "",
+  };
+}
+
+// deno-lint-ignore no-explicit-any
+function summarizeChanges(changes: any[]): string {
+  if (!changes || !changes.length) return "";
+  const upd = changes.filter((c) => c.type === "updated").map((c) => `${c.name}: ${c.from ?? "?"}→${c.to ?? "?"}`);
+  const rem = changes.filter((c) => c.type === "removed").map((c) => c.name);
+  const parts: string[] = [];
+  if (upd.length) parts.push("обновлено — " + upd.join(", "));
+  if (rem.length) parts.push("убрано — " + rem.join(", "));
+  return parts.length ? " (" + parts.join("; ") + ")" : "";
+}
+
+function likeContains(fragment: string): string {
+  return "%" + String(fragment).replace(/([%_\\])/g, "\\$1") + "%";
+}
+
 async function processOrderText(chatId: number, link: { user_id: string }, rawText: string) {
   if (!rawText || !rawText.trim()) {
     await tg("sendMessage", { chat_id: chatId, text: "Не удалось распознать текст. Попробуйте ещё раз." });
@@ -170,19 +227,68 @@ async function processOrderText(chatId: number, link: { user_id: string }, rawTe
   }
   const norm = normalizeTranscript(rawText);
   const parsed = await parseOrder(norm.text);
-  const items = normItems(parsed.items);
+  let items = normItems(parsed.items);
+  const supplier = link.user_id;
 
+  // 1. Определяем клиента среди кандидатов по базе клиентов поставщика.
+  // deno-lint-ignore no-explicit-any
+  const cands: any[] = [];
+  if (Array.isArray(parsed.name_candidates)) {
+    // deno-lint-ignore no-explicit-any
+    parsed.name_candidates.forEach((c: any) => { if (c && c.name) cands.push({ name: String(c.name).trim(), greeting: c.greeting === true }); });
+  }
+  if (parsed.client_name && !cands.some((c) => c.name.toLowerCase() === String(parsed.client_name).toLowerCase())) {
+    cands.unshift({ name: String(parsed.client_name).trim(), greeting: false });
+  }
+
+  let chosenName = parsed.client_name ? String(parsed.client_name) : "";
+  // deno-lint-ignore no-explicit-any
+  let dbClient: any = null;
+  if (cands.length) {
+    // deno-lint-ignore no-explicit-any
+    const checked: any[] = [];
+    for (const c of cands) {
+      const { data } = await svc().from("clients").select("name, standard_order")
+        .eq("user_id", supplier).ilike("name", likeContains(c.name)).limit(1);
+      const hit = data && data[0];
+      checked.push({ name: c.name, greeting: c.greeting, inDb: !!hit, _db: hit || null });
+    }
+    const pick = pickClient(checked, MANAGER_NAMES);
+    if (pick) {
+      const row = checked.find((c) => c.name.toLowerCase() === pick.name.toLowerCase());
+      dbClient = row ? row._db : null;
+      chosenName = dbClient ? dbClient.name : pick.name;
+    }
+  }
+
+  // 2. «Как обычно» → слияние стандартного заказа клиента (без дублей).
+  let note = "";
+  if (parsed.repeat_last_order && dbClient && Array.isArray(dbClient.standard_order) && dbClient.standard_order.length) {
+    const merged = mergeStandardOrder(dbClient.standard_order.map(stdItem), items);
+    items = merged.items;
+    note = `↩️ Подставлен стандартный заказ «${chosenName}»${summarizeChanges(merged.changes)}`;
+  } else if (parsed.repeat_last_order && !dbClient) {
+    note = "↩️ Просит «как обычно», но клиент не найден в базе — проверьте имя.";
+  }
+
+  // 3. Цены из каталога для позиций без цены.
+  const { data: products } = await svc().from("products").select("name, price").eq("user_id", supplier);
+  if (products && products.length) {
+    items.forEach((it) => {
+      if (it.price == null) { const p = matchProduct(it.name, products); if (p && p.price != null) it.price = Number(p.price); }
+    });
+  }
+
+  // 4. Сохраняем pending и шлём CSV-файл с кнопками.
   await svc().from("telegram_links").update({
-    pending_order: { client_name: parsed.client_name || null, items, source_text: norm.text },
+    pending_order: { client_name: chosenName || null, items, source_text: norm.text },
   }).eq("chat_id", chatId);
 
-  await tg("sendMessage", {
-    chat_id: chatId,
-    text: formatOrder(parsed, items, norm),
-    reply_markup: { inline_keyboard: [[
-      { text: "✅ Сохранить", callback_data: "save" },
-      { text: "✖ Отмена", callback_data: "cancel" },
-    ]] },
+  let caption = formatOrder({ ...parsed, client_name: chosenName }, items, norm);
+  if (note) caption += "\n" + note;
+  const fname = "Заказ_" + (chosenName || "клиент").replace(/[^\p{L}\p{N}]+/gu, "_") + ".csv";
+  await tgDocument(chatId, fname, buildCsv(items), caption.slice(0, 1000), {
+    inline_keyboard: [[{ text: "✅ Сохранить", callback_data: "save" }, { text: "✖ Отмена", callback_data: "cancel" }]],
   });
 }
 
