@@ -8,9 +8,24 @@ function norm(s: any): string {
   return String(s == null ? "" : s).toLowerCase().replace(/ё/g, "е")
     .replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
 }
+// Лёгкий стемминг: «стакан/стаканы/стаканов», «пластиковый/пластик» → одна основа.
+function stem(w: string): string {
+  if (w.length <= 4) return w;
+  const ends = [
+    "овский", "овская", "овские", "ового", "овому", "овыми", "овых",
+    "овый", "овая", "овое", "овые", "овой", "овым", "ами", "ями",
+    "ах", "ях", "ев", "ов", "ей", "ой", "ый", "ий", "ая", "яя", "ое", "ее", "ые", "ие", "ом", "ем",
+    "а", "е", "и", "о", "у", "ы", "ь", "я", "ю",
+  ];
+  for (const e of ends) {
+    if (w.length - e.length >= 4 && w.slice(-e.length) === e) return w.slice(0, w.length - e.length);
+  }
+  return w;
+}
+
 function wordSet(s: any): Set<string> {
   const set = new Set<string>();
-  norm(s).split(" ").forEach((w) => { if (w.length >= 2) set.add(w); });
+  norm(s).split(" ").forEach((w) => { if (w.length >= 2) set.add(stem(w)); });
   return set;
 }
 

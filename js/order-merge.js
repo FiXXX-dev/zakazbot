@@ -28,9 +28,26 @@
       .trim();
   }
 
+  // Лёгкий стемминг: обрезаем частые русские окончания, чтобы «стакан/стаканы/
+  // стаканов» и «пластиковый/пластик» считались одним словом. Основа ≥ 4 символов.
+  function stem(w) {
+    if (w.length <= 4) return w;
+    const ends = [
+      "овский", "овская", "овские", "ового", "овому", "овыми", "овых",
+      "овый", "овая", "овое", "овые", "овой", "овым", "ами", "ями",
+      "ах", "ях", "ев", "ов", "ей", "ой", "ый", "ий", "ая", "яя", "ое", "ее", "ые", "ие", "ом", "ем",
+      "а", "е", "и", "о", "у", "ы", "ь", "я", "ю"
+    ];
+    for (let i = 0; i < ends.length; i++) {
+      const e = ends[i];
+      if (w.length - e.length >= 4 && w.slice(-e.length) === e) return w.slice(0, w.length - e.length);
+    }
+    return w;
+  }
+
   function wordSet(s) {
     const set = new Set();
-    norm(s).split(" ").forEach(function (w) { if (w.length >= 2) set.add(w); });
+    norm(s).split(" ").forEach(function (w) { if (w.length >= 2) set.add(stem(w)); });
     return set;
   }
 
