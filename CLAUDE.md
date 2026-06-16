@@ -47,6 +47,7 @@ GPT-4o-mini выделяет позиции → менеджер правит т
 | `js/excel.js` | `window.ExcelUtils.downloadOrderExcel(order)` — выгрузка XLSX |
 | `supabase/functions/openaiproxy/index.ts` | Edge Function — прокси к OpenAI |
 | `supabase/functions/clientauth/index.ts` | Edge Function (service-role) — вход по ACCESS_KEY и админ-операции (создание/список/обновление клиентов) |
+| `supabase/functions/tgbot/index.ts` (+ `normalize.ts`) | Telegram-бот: голос/текст → Whisper → нормализация → GPT → подтверждение → сохранение заказа. Привязка чата по ACCESS_KEY |
 | `sql/schema.sql` | Таблицы `orders`, `clients`, `products`, `order_logs` + бакет `order-audio` + RLS |
 | `config.js` | Конфигурация (хранится в репозитории: только публичные значения, ключ OpenAI — никогда) |
 
@@ -64,9 +65,12 @@ GPT-4o-mini выделяет позиции → менеджер правит т
    пустой. Режим `"direct"` (ключ вписан в config.js) — только локальный тест,
    такой файл НЕ коммитить.
 
-3. **Системный промпт продублирован** в `js/openai.js` (direct) и
-   `supabase/functions/openaiproxy/index.ts` (edge).
-   Любые изменения промпта вносить в ОБА файла синхронно.
+3. **Системный промпт продублирован** в ТРЁХ местах: `js/openai.js` (direct),
+   `supabase/functions/openaiproxy/index.ts` (edge) и
+   `supabase/functions/tgbot/index.ts` (Telegram-бот).
+   Любые изменения промпта вносить во все три файла синхронно.
+   Аналогично нормализация: `js/dictionary.js`+`js/normalize.js` (фронт) и
+   `supabase/functions/tgbot/normalize.ts` (порт для бота) — держать в синхроне.
 
 4. **Таблица позиций (new-order) не перерисовывается при вводе.**
    Обработчики `input` обновляют только модель (`items`), ячейку «Сумма» и
@@ -128,6 +132,8 @@ plan_limits: plan (pk 'basic'|'pro'), max_products, max_clients (NULL=безли
 clients_accounts: id uuid, company_name, email, access_key (uniq, 16 симв.),
             plan, status ('active'|'inactive'), user_id, auth_email, created_at
             (закрыта RLS; читает только service role в clientauth)
+telegram_links: chat_id (pk, bigint), user_id, company_name, pending_order jsonb,
+            created_at   (привязка ТГ-чата к аккаунту; только service role в tgbot)
 ```
 
 У `orders`/`clients`/`products`/`order_logs` есть `user_id` (владелец строки).
