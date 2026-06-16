@@ -150,15 +150,19 @@
         "<td>" + esc(fmtDate(c.created_at)) + "</td>" +
         '<td class="key-cell"><code class="key-code">' + esc(c.access_key) + "</code>" +
           '<button type="button" class="btn btn-outline btn-sm key-copy" data-key="' + esc(c.access_key) + '">Скопировать</button></td>' +
+        '<td class="key-cell">' + inviteCell(c) + "</td>" +
         "</tr>";
     }).join("");
     els.table.innerHTML =
       '<div class="table-wrap"><table class="items-table"><thead><tr>' +
-        "<th>Компания</th><th>План</th><th>Статус</th><th>Создан</th><th>Ключ доступа</th>" +
+        "<th>Компания</th><th>План</th><th>Статус</th><th>Создан</th><th>Ключ доступа</th><th>Ссылка для клиентов (Telegram)</th>" +
       "</tr></thead><tbody>" + rows + "</tbody></table></div>";
 
     els.table.querySelectorAll(".key-copy").forEach(function (btn) {
       btn.addEventListener("click", function () { copyKey(btn.dataset.key, btn); });
+    });
+    els.table.querySelectorAll(".link-copy").forEach(function (btn) {
+      btn.addEventListener("click", function () { copyKey(btn.dataset.link, btn); });
     });
     els.table.querySelectorAll(".plan-sel").forEach(function (sel) {
       sel.addEventListener("change", function () { update(sel.dataset.id, { plan: sel.value }); });
@@ -176,6 +180,13 @@
       alert("Не удалось обновить: " + e.message);
       loadClients().catch(function () {});
     }
+  }
+
+  function inviteCell(c) {
+    const u = (window.CONFIG && window.CONFIG.TELEGRAM_BOT_USERNAME) || "";
+    if (!u || !c.customer_code) return "—";
+    const link = "https://t.me/" + u + "?start=" + c.customer_code;
+    return '<button type="button" class="btn btn-outline btn-sm link-copy" data-link="' + esc(link) + '">Скопировать ссылку</button>';
   }
 
   function planSelect(c) {

@@ -130,10 +130,12 @@ subscriptions: id uuid, user_id (uniq), client_name, status ('active'|'expired')
 plan_limits: plan (pk 'basic'|'pro'), max_products, max_clients (NULL=безлимит),
             has_analytics, has_1c_integration, has_priority_support, has_custom_branding
 clients_accounts: id uuid, company_name, email, access_key (uniq, 16 симв.),
-            plan, status ('active'|'inactive'), user_id, auth_email, created_at
+            plan, status ('active'|'inactive'), user_id, auth_email,
+            customer_code (uniq, для ссылки-приглашения кафе), created_at
             (закрыта RLS; читает только service role в clientauth)
-telegram_links: chat_id (pk, bigint), user_id, company_name, pending_order jsonb,
-            created_at   (привязка ТГ-чата к аккаунту; только service role в tgbot)
+telegram_links: chat_id (pk, bigint), user_id, company_name,
+            role ('manager'|'customer'), client_name (кафе для customer),
+            pending_order jsonb, created_at   (только service role в tgbot)
 ```
 
 У `orders`/`clients`/`products`/`order_logs` есть `user_id` (владелец строки).
