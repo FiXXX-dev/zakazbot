@@ -159,6 +159,31 @@ juft=пар, qop=мешок, korobka=коробка, upakovka=упаковка).
   закомментированный блок политик в `sql/schema.sql`.
 - Ключ OpenAI хранится только в секретах Supabase (режим `edge`).
 
+## Telegram-бот (приём заказов)
+
+Edge Function `tgbot` принимает заказы прямо в Telegram: голос/текст → Whisper →
+нормализация → GPT → подтверждение кнопкой → сохранение в `orders`. Старт —
+режим «менеджер-оператор»: менеджер пересылает боту голосовые, подтверждает разбор.
+
+Настройка:
+1. Создайте бота у **@BotFather**, получите токен.
+2. Секреты Supabase:
+   ```bash
+   supabase secrets set TELEGRAM_BOT_TOKEN=<токен>
+   supabase secrets set TELEGRAM_WEBHOOK_SECRET=<любая_строка>
+   supabase functions deploy tgbot       # или пуш в main — задеплоит CI
+   ```
+3. Пропишите webhook (один раз):
+   ```bash
+   curl "https://api.telegram.org/bot<ТОКЕН>/setWebhook?url=<SUPABASE_URL>/functions/v1/tgbot&secret_token=<TELEGRAM_WEBHOOK_SECRET>"
+   ```
+4. В боте: `/start` → прислать **ACCESS_KEY** (из `admin-dashboard.html`) → чат
+   привязан. Дальше шлите голосовое/текст — бот вернёт разобранный заказ.
+
+Нормализация в боте — порт `js/normalize.js`+`js/dictionary.js` в
+`supabase/functions/tgbot/normalize.ts`; системный промпт совпадает с
+`js/openai.js` и `openaiproxy` (менять синхронно во всех трёх).
+
 ## Структура проекта
 
 ```
@@ -195,6 +220,9 @@ juft=пар, qop=мешок, korobka=коробка, upakovka=упаковка).
 │   └── index.ts            # Edge Function — прокси к OpenAI
 ├── supabase/functions/clientauth/
 │   └── index.ts            # Edge Function — вход по ACCESS_KEY + админ-операции
+├── supabase/functions/tgbot/
+│   ├── index.ts            # Telegram-бот: приём голосовых/текстовых заказов
+│   └── normalize.ts        # порт нормализации (dictionary+normalize) в TS
 ├── CLAUDE.md
 └── README.md
 ```
