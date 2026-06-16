@@ -329,18 +329,24 @@ async function onCallback(cb: any) {
   const data = cb.data;
   const link = await getLink(chatId);
   await tg("answerCallbackQuery", { callback_query_id: cb.id });
-
   if (!link || !link.user_id) return;
+
+  // Сообщение с заказом — это документ (CSV), поэтому правим не текст, а
+  // только убираем кнопки; подтверждение шлём отдельным сообщением.
+  const clearButtons = () =>
+    tg("editMessageReplyMarkup", { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } });
 
   if (data === "cancel") {
     await svc().from("telegram_links").update({ pending_order: null }).eq("chat_id", chatId);
-    await tg("editMessageText", { chat_id: chatId, message_id: messageId, text: "Отменено." });
+    await clearButtons();
+    await tg("sendMessage", { chat_id: chatId, text: "Отменено.", reply_markup: kb(link) });
     return;
   }
   if (data === "save") {
     const pending = link.pending_order;
     if (!pending || !Array.isArray(pending.items) || !pending.items.length) {
-      await tg("editMessageText", { chat_id: chatId, message_id: messageId, text: "Нечего сохранять." });
+      await clearButtons();
+      await tg("sendMessage", { chat_id: chatId, text: "Нечего сохранять (заказ устарел). Пришлите заново." });
       return;
     }
     const { error } = await svc().from("orders").insert({
@@ -351,17 +357,19 @@ async function onCallback(cb: any) {
       source_text: pending.source_text || null,
     });
     if (error) {
-      await tg("editMessageText", { chat_id: chatId, message_id: messageId, text: "Ошибка сохранения: " + error.message });
+      await tg("sendMessage", { chat_id: chatId, text: "Ошибка сохранения: " + error.message });
       return;
     }
     await svc().from("telegram_links").update({ pending_order: null }).eq("chat_id", chatId);
+    await clearButtons();
     if (link.role === "customer") {
       const n = await forwardToManagers(link.user_id, pending);
-      await tg("editMessageText", { chat_id: chatId, message_id: messageId,
+      await tg("sendMessage", { chat_id: chatId, reply_markup: kb(link),
         text: n ? "✅ Заказ отправлен поставщику. Спасибо!"
                 : "✅ Заказ принят и сохранён. (Менеджер ещё не подключил Telegram.)" });
     } else {
-      await tg("editMessageText", { chat_id: chatId, message_id: messageId, text: "✅ Заказ сохранён. Откройте веб-кабинет, чтобы выгрузить Excel." });
+      await tg("sendMessage", { chat_id: chatId, reply_markup: kb(link),
+        text: "✅ Заказ сохранён. Откройте веб-кабинет, чтобы выгрузить Excel." });
     }
   }
 }
