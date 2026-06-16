@@ -13,7 +13,9 @@
 // изменения вносить во все три синхронно.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import * as XLSX from "https://esm.sh/xlsx@0.20.3";
 import { normalizeTranscript } from "./normalize.ts";
+import { mergeStandardOrder, matchProduct, pickClient, MANAGER_NAMES } from "./order-logic.ts";
 
 const TG_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
 const WEBHOOK_SECRET = Deno.env.get("TELEGRAM_WEBHOOK_SECRET") ?? "";
@@ -55,7 +57,7 @@ const SYSTEM_PROMPT = `Ты — система распознавания зак
 - ИМЕНА. В name_candidates перечисли ВСЕ имена людей из текста; ставь greeting=true, если это приветственное обращение («Добрый день, Имя», «Салом, Имя», «Здравствуйте, Имя»). В client_name укажи того, кто РАЗМЕЩАЕТ заказ, а не того, кого просто поприветствовали; не выбирай имя только потому, что оно первое или стоит сразу после приветствия. Если не уверен — оставь client_name пустым, но name_candidates всё равно заполни.
 - В items только то, что заказывают: продукты, упаковка, посуда и т.д. Не добавляй в items название заведения или имя клиента.
 - САМОИСПРАВЛЕНИЯ И УТОЧНЕНИЯ. Клиент часто называет одно число, потом говорит «ээ», «нет», «йук», «yo'q», «ne», «ya'ni» и называет другое число — это значит он ИСПРАВЛЯЕТ себя. Всегда бери ПОСЛЕДНЕЕ названное число, не первое. Пример: «2 штуки... ээ нет 200 штук» → qty=200. Пример: «вилок столько же» → то же количество что у предыдущего товара. Для таких позиций ставь corrected=true.
-- ПОВТОРЫ. Если один и тот же товар упомянут несколько раз — используй последнюю, уточнённую версию (количество и единицу), не дублируй позицию.
+- ПОВТОРЫ И СЛОВОФОРМЫ. Считай разные формы одного товара одним и тем же (стакан/стаканы/стаканов, пластиковый/пластиковая/пластик — это ОДИН товар) и НЕ создавай для него отдельные строки. Если товар сначала назван без количества, а число прозвучало позже («ещё стаканы… а стакан 200») — присвой это количество этому товару. Если товар упомянут несколько раз — одна строка с последним названным количеством.
 - Узбекские единицы: dona=шт, ta=шт, juft=пар, qop=мешок, korobka=коробка, upakovka=упаковка.
 - confidence_score (0–100) — насколько уверенно распознана позиция. Понижай его, если: количество не указано, название товара неясно, было самоисправление. Согласуй: confidence="low" при score<55, "medium" при 55–79, "high" при ≥80.
 - Не придумывай количество если не сказано — ставь qty=null и понижай confidence_score.
@@ -163,27 +165,192 @@ async function getLink(chatId: number): Promise<any> {
   return data;
 }
 
-async function processOrderText(chatId: number, link: { user_id: string }, rawText: string) {
+// Отправка файла документом в Telegram (multipart).
+async function tgDocument(chatId: number, filename: string, blob: Blob, caption: string, replyMarkup: unknown) {
+  const fd = new FormData();
+  fd.append("chat_id", String(chatId));
+  fd.append("document", blob, filename);
+  if (caption) fd.append("caption", caption);
+  if (replyMarkup) fd.append("reply_markup", JSON.stringify(replyMarkup));
+  const r = await fetch(`${TG_API}/sendDocument`, { method: "POST", body: fd });
+  return await r.json();
+}
+
+// deno-lint-ignore no-explicit-any
+function buildXlsx(items: any[]): Uint8Array {
+  // deno-lint-ignore no-explicit-any
+  const rows: any[][] = [["№", "Наименование", "Количество", "Ед.изм.", "Цена", "Сумма"]];
+  let total = 0;
+  items.forEach((it, i) => {
+    const sum = it.qty != null && it.price != null ? it.qty * it.price : "";
+    if (typeof sum === "number") total += sum;
+    rows.push([i + 1, it.name || "", it.qty == null ? "" : it.qty, it.unit || "", it.price == null ? "" : it.price, sum]);
+  });
+  rows.push(["", "Итого", "", "", "", total]);
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws["!cols"] = [{ wch: 5 }, { wch: 42 }, { wch: 12 }, { wch: 9 }, { wch: 12 }, { wch: 14 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Заказ");
+  return new Uint8Array(XLSX.write(wb, { bookType: "xlsx", type: "array" }));
+}
+
+// Готовит файл заказа в нужном формате → { filename, blob }.
+// deno-lint-ignore no-explicit-any
+function buildOrderFile(format: string, clientName: string, items: any[]): { filename: string; blob: Blob } {
+  const base = "Заказ_" + String(clientName || "клиент").replace(/[^\p{L}\p{N}]+/gu, "_");
+  if (format === "csv") {
+    return { filename: base + ".csv", blob: new Blob(["﻿" + buildCsv(items)], { type: "text/csv" }) };
+  }
+  return {
+    filename: base + ".xlsx",
+    blob: new Blob([buildXlsx(items)], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+  };
+}
+
+function csvCell(v: unknown): string {
+  const s = String(v == null ? "" : v);
+  return /[;"\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+// deno-lint-ignore no-explicit-any
+function buildCsv(items: any[]): string {
+  const rows: string[][] = [["№", "Наименование", "Количество", "Ед.изм.", "Цена", "Сумма"]];
+  let total = 0;
+  items.forEach((it, i) => {
+    const sum = it.qty != null && it.price != null ? it.qty * it.price : "";
+    if (typeof sum === "number") total += sum;
+    rows.push([String(i + 1), it.name || "", it.qty == null ? "" : String(it.qty),
+      it.unit || "", it.price == null ? "" : String(it.price), sum === "" ? "" : String(sum)]);
+  });
+  rows.push(["", "Итого", "", "", "", String(total)]);
+  return rows.map((r) => r.map(csvCell).join(";")).join("\r\n");
+}
+
+// deno-lint-ignore no-explicit-any
+function stdItem(it: any) {
+  return {
+    name: it && it.name ? String(it.name) : "",
+    qty: it && it.qty != null && it.qty !== "" && !isNaN(Number(it.qty)) ? Number(it.qty) : null,
+    unit: it && it.unit ? String(it.unit) : "шт",
+    price: it && it.price != null && it.price !== "" && !isNaN(Number(it.price)) ? Number(it.price) : null,
+    confidence: "high", confidence_score: 90, corrected: false, note: "",
+  };
+}
+
+// deno-lint-ignore no-explicit-any
+function summarizeChanges(changes: any[]): string {
+  if (!changes || !changes.length) return "";
+  const upd = changes.filter((c) => c.type === "updated").map((c) => `${c.name}: ${c.from ?? "?"}→${c.to ?? "?"}`);
+  const rem = changes.filter((c) => c.type === "removed").map((c) => c.name);
+  const parts: string[] = [];
+  if (upd.length) parts.push("обновлено — " + upd.join(", "));
+  if (rem.length) parts.push("убрано — " + rem.join(", "));
+  return parts.length ? " (" + parts.join("; ") + ")" : "";
+}
+
+function likeContains(fragment: string): string {
+  return "%" + String(fragment).replace(/([%_\\])/g, "\\$1") + "%";
+}
+
+// deno-lint-ignore no-explicit-any
+async function processOrderText(chatId: number, link: any, rawText: string) {
   if (!rawText || !rawText.trim()) {
     await tg("sendMessage", { chat_id: chatId, text: "Не удалось распознать текст. Попробуйте ещё раз." });
     return;
   }
   const norm = normalizeTranscript(rawText);
   const parsed = await parseOrder(norm.text);
-  const items = normItems(parsed.items);
+  let items = normItems(parsed.items);
+  const supplier = link.user_id;
 
+  let chosenName = parsed.client_name ? String(parsed.client_name) : "";
+  // deno-lint-ignore no-explicit-any
+  let dbClient: any = null;
+
+  if (link.role === "customer" && link.client_name) {
+    // Клиент фиксирован — это кафе, приславшее заказ (не доверяем имени из речи).
+    chosenName = link.client_name;
+    const { data } = await svc().from("clients").select("name, standard_order")
+      .eq("user_id", supplier).ilike("name", likeContains(chosenName)).limit(1);
+    if (data && data[0]) { dbClient = data[0]; chosenName = data[0].name; }
+  } else {
+    // Менеджер: определяем клиента среди кандидатов по базе клиентов поставщика.
+    // deno-lint-ignore no-explicit-any
+    const cands: any[] = [];
+    if (Array.isArray(parsed.name_candidates)) {
+      // deno-lint-ignore no-explicit-any
+      parsed.name_candidates.forEach((c: any) => { if (c && c.name) cands.push({ name: String(c.name).trim(), greeting: c.greeting === true }); });
+    }
+    if (parsed.client_name && !cands.some((c) => c.name.toLowerCase() === String(parsed.client_name).toLowerCase())) {
+      cands.unshift({ name: String(parsed.client_name).trim(), greeting: false });
+    }
+    if (cands.length) {
+      // deno-lint-ignore no-explicit-any
+      const checked: any[] = [];
+      for (const c of cands) {
+        const { data } = await svc().from("clients").select("name, standard_order")
+          .eq("user_id", supplier).ilike("name", likeContains(c.name)).limit(1);
+        const hit = data && data[0];
+        checked.push({ name: c.name, greeting: c.greeting, inDb: !!hit, _db: hit || null });
+      }
+      const pick = pickClient(checked, MANAGER_NAMES);
+      if (pick) {
+        const row = checked.find((c) => c.name.toLowerCase() === pick.name.toLowerCase());
+        dbClient = row ? row._db : null;
+        chosenName = dbClient ? dbClient.name : pick.name;
+      }
+    }
+  }
+
+  // 2. «Как обычно» → слияние стандартного заказа клиента (без дублей).
+  let note = "";
+  if (parsed.repeat_last_order && dbClient && Array.isArray(dbClient.standard_order) && dbClient.standard_order.length) {
+    const merged = mergeStandardOrder(dbClient.standard_order.map(stdItem), items);
+    items = merged.items;
+    note = `↩️ Подставлен стандартный заказ «${chosenName}»${summarizeChanges(merged.changes)}`;
+  } else if (parsed.repeat_last_order && !dbClient) {
+    note = "↩️ Просит «как обычно», но клиент не найден в базе — проверьте имя.";
+  }
+
+  // 3. Цены из каталога для позиций без цены.
+  const { data: products } = await svc().from("products").select("name, price").eq("user_id", supplier);
+  if (products && products.length) {
+    items.forEach((it) => {
+      if (it.price == null) { const p = matchProduct(it.name, products); if (p && p.price != null) it.price = Number(p.price); }
+    });
+  }
+
+  // 4. Сохраняем pending и шлём CSV-файл с кнопками.
   await svc().from("telegram_links").update({
-    pending_order: { client_name: parsed.client_name || null, items, source_text: norm.text },
+    pending_order: { client_name: chosenName || null, items, source_text: norm.text },
   }).eq("chat_id", chatId);
 
-  await tg("sendMessage", {
-    chat_id: chatId,
-    text: formatOrder(parsed, items, norm),
-    reply_markup: { inline_keyboard: [[
-      { text: "✅ Сохранить", callback_data: "save" },
-      { text: "✖ Отмена", callback_data: "cancel" },
-    ]] },
+  let caption = formatOrder({ ...parsed, client_name: chosenName }, items, norm);
+  if (note) caption += "\n" + note;
+  const file = buildOrderFile(link.file_format || "xlsx", chosenName, items);
+  await tgDocument(chatId, file.filename, file.blob, caption.slice(0, 1000), {
+    inline_keyboard: [[{ text: "✅ Сохранить", callback_data: "save" }, { text: "✖ Отмена", callback_data: "cancel" }]],
   });
+}
+
+// deno-lint-ignore no-explicit-any
+function pendingSummary(pending: any): string {
+  const items = Array.isArray(pending.items) ? pending.items : [];
+  return items.map((it: any, i: number) => `${i + 1}. ${it.name} — ${it.qty == null ? "?" : it.qty} ${it.unit || ""}`).join("\n");
+}
+
+// Пересылает заказ клиента всем чатам-менеджерам этого поставщика (CSV + сводка).
+// deno-lint-ignore no-explicit-any
+async function forwardToManagers(supplier: string, pending: any): Promise<number> {
+  const { data } = await svc().from("telegram_links").select("chat_id, file_format").eq("user_id", supplier).eq("role", "manager");
+  if (!data || !data.length) return 0;
+  const cafe = pending.client_name || "клиент";
+  const caption = (`🆕 Новый заказ от «${cafe}»\n` + pendingSummary(pending)).slice(0, 1000);
+  for (const m of data) {
+    const file = buildOrderFile(m.file_format || "xlsx", cafe, pending.items || []);
+    await tgDocument(m.chat_id, file.filename, file.blob, caption, null);
+  }
+  return data.length;
 }
 
 // deno-lint-ignore no-explicit-any
@@ -193,18 +360,24 @@ async function onCallback(cb: any) {
   const data = cb.data;
   const link = await getLink(chatId);
   await tg("answerCallbackQuery", { callback_query_id: cb.id });
-
   if (!link || !link.user_id) return;
+
+  // Сообщение с заказом — это документ (CSV), поэтому правим не текст, а
+  // только убираем кнопки; подтверждение шлём отдельным сообщением.
+  const clearButtons = () =>
+    tg("editMessageReplyMarkup", { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } });
 
   if (data === "cancel") {
     await svc().from("telegram_links").update({ pending_order: null }).eq("chat_id", chatId);
-    await tg("editMessageText", { chat_id: chatId, message_id: messageId, text: "Отменено." });
+    await clearButtons();
+    await tg("sendMessage", { chat_id: chatId, text: "Отменено.", reply_markup: kb(link) });
     return;
   }
   if (data === "save") {
     const pending = link.pending_order;
     if (!pending || !Array.isArray(pending.items) || !pending.items.length) {
-      await tg("editMessageText", { chat_id: chatId, message_id: messageId, text: "Нечего сохранять." });
+      await clearButtons();
+      await tg("sendMessage", { chat_id: chatId, text: "Нечего сохранять (заказ устарел). Пришлите заново." });
       return;
     }
     const { error } = await svc().from("orders").insert({
@@ -215,22 +388,36 @@ async function onCallback(cb: any) {
       source_text: pending.source_text || null,
     });
     if (error) {
-      await tg("editMessageText", { chat_id: chatId, message_id: messageId, text: "Ошибка сохранения: " + error.message });
+      await tg("sendMessage", { chat_id: chatId, text: "Ошибка сохранения: " + error.message });
       return;
     }
     await svc().from("telegram_links").update({ pending_order: null }).eq("chat_id", chatId);
-    await tg("editMessageText", { chat_id: chatId, message_id: messageId, text: "✅ Заказ сохранён. Откройте веб-кабинет, чтобы выгрузить Excel." });
+    await clearButtons();
+    if (link.role === "customer") {
+      const n = await forwardToManagers(link.user_id, pending);
+      await tg("sendMessage", { chat_id: chatId, reply_markup: kb(link),
+        text: n ? "✅ Заказ отправлен поставщику. Спасибо!"
+                : "✅ Заказ принят и сохранён. (Менеджер ещё не подключил Telegram.)" });
+    } else {
+      await tg("sendMessage", { chat_id: chatId, reply_markup: kb(link),
+        text: "✅ Заказ сохранён. Откройте веб-кабинет, чтобы выгрузить Excel." });
+    }
   }
 }
 
-// Постоянная клавиатура с основными действиями.
+// Постоянная клавиатура с основными действиями (менеджер).
 function mainKeyboard() {
   return {
-    keyboard: [["📦 Мои заказы", "👤 Мой аккаунт"], ["ℹ️ Помощь", "🚪 Выйти"]],
+    keyboard: [["📦 Мои заказы", "👤 Мой аккаунт"], ["📄 Формат файла", "ℹ️ Помощь"], ["🚪 Выйти"]],
     resize_keyboard: true,
     is_persistent: true,
   };
 }
+function customerKeyboard() {
+  return { keyboard: [["ℹ️ Помощь"], ["🚪 Выйти"]], resize_keyboard: true, is_persistent: true };
+}
+// deno-lint-ignore no-explicit-any
+function kb(link: any) { return link && link.role === "customer" ? customerKeyboard() : mainKeyboard(); }
 
 // Текст кнопки/команды → действие.
 function cmdOf(text: string): string | null {
@@ -240,6 +427,7 @@ function cmdOf(text: string): string | null {
   if (t === "/help" || t === "ℹ️ Помощь") return "help";
   if (t === "/account" || t === "/status" || t === "👤 Мой аккаунт") return "account";
   if (t === "/orders" || t === "📦 Мои заказы") return "orders";
+  if (t === "/format" || t === "📄 Формат файла") return "format";
   return null;
 }
 
@@ -248,9 +436,18 @@ async function setCommands() {
     { command: "start", description: "Войти / меню" },
     { command: "orders", description: "Мои последние заказы" },
     { command: "account", description: "Мой тариф" },
+    { command: "format", description: "Формат файла: Excel/CSV" },
     { command: "logout", description: "Выйти из аккаунта" },
     { command: "help", description: "Помощь" },
   ] });
+}
+
+// deno-lint-ignore no-explicit-any
+async function doFormat(chatId: number, link: any) {
+  const next = link.file_format === "csv" ? "xlsx" : "csv";
+  await svc().from("telegram_links").update({ file_format: next }).eq("chat_id", chatId);
+  const label = next === "csv" ? "CSV" : "Excel (.xlsx)";
+  await tg("sendMessage", { chat_id: chatId, text: `Формат файла заказов: ${label}. Нажмите ещё раз, чтобы переключить.`, reply_markup: mainKeyboard() });
 }
 
 async function doLogout(chatId: number) {
@@ -262,12 +459,12 @@ async function doLogout(chatId: number) {
   });
 }
 
-async function doHelp(chatId: number) {
-  await tg("sendMessage", {
-    chat_id: chatId,
-    text: "Пришлите голосовое сообщение или текст заказа — я разберу его в позиции и предложу сохранить (кнопки ✅/✖ под заказом).\n\nМеню:\n📦 Мои заказы — последние 5\n👤 Мой аккаунт — тариф и статус\n🚪 Выйти — отвязать этот чат",
-    reply_markup: mainKeyboard(),
-  });
+// deno-lint-ignore no-explicit-any
+async function doHelp(chatId: number, link: any) {
+  const text = link && link.role === "customer"
+    ? "Присылайте заказ голосом или текстом — я разберу его и передам поставщику (подтвердите кнопкой ✅).\n🚪 Выйти — отвязать чат."
+    : "Пришлите голосовое сообщение или текст заказа — я разберу его в позиции и предложу сохранить (кнопки ✅/✖).\n\nМеню:\n📦 Мои заказы — последние 5\n👤 Мой аккаунт — тариф и статус\n🚪 Выйти — отвязать чат";
+  await tg("sendMessage", { chat_id: chatId, text, reply_markup: kb(link) });
 }
 
 // deno-lint-ignore no-explicit-any
@@ -308,6 +505,25 @@ async function handle(update: any) {
   const text = (msg.text || "").trim();
   const link = await getLink(chatId);
 
+  // ── Ссылка-приглашение клиента: /start <customer_code> ──
+  const startPayload = text.startsWith("/start ") ? text.slice(7).trim() : "";
+  if (startPayload) {
+    const acct = await svc().from("clients_accounts")
+      .select("user_id, company_name, status").eq("customer_code", startPayload).maybeSingle();
+    if (acct.data && acct.data.status === "active") {
+      await svc().from("telegram_links").upsert({
+        chat_id: chatId, user_id: acct.data.user_id, company_name: acct.data.company_name,
+        role: "customer", client_name: null, pending_order: null,
+      }, { onConflict: "chat_id" });
+      await tg("sendMessage", { chat_id: chatId,
+        text: `Вы подключаетесь к поставщику «${acct.data.company_name}».\nНапишите название вашего заведения (например: Кафе Лагман).`,
+        reply_markup: { remove_keyboard: true } });
+      return;
+    }
+    await tg("sendMessage", { chat_id: chatId, text: "Ссылка-приглашение недействительна. Обратитесь к поставщику." });
+    return;
+  }
+
   // ── Не привязан: ждём ключ доступа ──
   if (!link || !link.user_id) {
     if (text === "/start" || !text) {
@@ -328,12 +544,31 @@ async function handle(update: any) {
       return;
     }
     await svc().from("telegram_links").upsert({
-      chat_id: chatId, user_id: acct.data.user_id, company_name: acct.data.company_name, pending_order: null,
+      chat_id: chatId, user_id: acct.data.user_id, company_name: acct.data.company_name,
+      role: "manager", client_name: null, pending_order: null,
     }, { onConflict: "chat_id" });
     await setCommands();
     await tg("sendMessage", { chat_id: chatId, text:
       `Готово ✅ Чат привязан к «${acct.data.company_name}».\n\nПрисылайте голосовое сообщение или текст заказа — я разберу его в позиции.`,
       reply_markup: mainKeyboard() });
+    return;
+  }
+
+  // ── Клиент только что подключился по ссылке: ждём название заведения ──
+  if (link.role === "customer" && !link.client_name) {
+    if (text && !text.startsWith("/")) {
+      const name = text.trim();
+      const existing = await svc().from("clients").select("id").eq("user_id", link.user_id).ilike("name", likeContains(name)).limit(1);
+      if (!existing.data || !existing.data.length) {
+        await svc().from("clients").insert({ user_id: link.user_id, name });
+      }
+      await svc().from("telegram_links").update({ client_name: name }).eq("chat_id", chatId);
+      await tg("sendMessage", { chat_id: chatId,
+        text: `Готово, «${name}»! Присылайте заказ голосом или текстом — я передам его поставщику.`,
+        reply_markup: customerKeyboard() });
+      return;
+    }
+    await tg("sendMessage", { chat_id: chatId, text: "Напишите, пожалуйста, название вашего заведения текстом." });
     return;
   }
 
@@ -352,19 +587,20 @@ async function handle(update: any) {
     case "start":
       await setCommands();
       await tg("sendMessage", { chat_id: chatId, text:
-        `Вы вошли как «${link.company_name}». Пришлите голосовое или текст заказа.`, reply_markup: mainKeyboard() });
+        `Вы вошли как «${link.company_name}». Пришлите голосовое или текст заказа.`, reply_markup: kb(link) });
       return;
     case "logout": await doLogout(chatId); return;
-    case "help": await doHelp(chatId); return;
-    case "account": await doAccount(chatId, link); return;
-    case "orders": await doOrders(chatId, link); return;
+    case "help": await doHelp(chatId, link); return;
+    case "account": if (link.role !== "customer") { await doAccount(chatId, link); return; } break;
+    case "orders": if (link.role !== "customer") { await doOrders(chatId, link); return; } break;
+    case "format": if (link.role !== "customer") { await doFormat(chatId, link); return; } break;
   }
   if (text && !text.startsWith("/")) {
     await tg("sendChatAction", { chat_id: chatId, action: "typing" });
     await processOrderText(chatId, link, text);
     return;
   }
-  await tg("sendMessage", { chat_id: chatId, text: "Пришлите голосовое сообщение или текст заказа.", reply_markup: mainKeyboard() });
+  await tg("sendMessage", { chat_id: chatId, text: "Пришлите голосовое сообщение или текст заказа.", reply_markup: kb(link) });
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {

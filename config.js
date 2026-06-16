@@ -19,6 +19,9 @@ window.CONFIG = {
   // Email администратора — на него уходит заявка «Upgrade на Pro» из settings.html.
   ADMIN_EMAIL: "nurmuhamedovsa@gmail.com",
 
+  // Username Telegram-бота (без @) — для ссылок-приглашений клиентов в админке.
+  TELEGRAM_BOT_USERNAME: "zakaaaz_bot",
+
   // Пароль админки (admin-dashboard.html) здесь НЕ хранится: он проверяется на
   // сервере в Edge Function clientauth. Задайте секрет в Supabase:
   //   supabase secrets set ADMIN_PANEL_SECRET=<ваш_пароль>
