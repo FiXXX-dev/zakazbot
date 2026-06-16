@@ -19,20 +19,30 @@
     cache = { plan: "basic", status: "active", expires_at: null, limits: defaultLimits("basic"), productCount: 0, clientCount: 0 };
     if (!window.sb || !userId) return cache;
     try {
-      const sub = await window.sb.from("subscriptions")
-        .select("plan,status,expires_at").eq("user_id", userId).maybeSingle();
-      if (sub.data) {
+      // Параллельно и устойчиво: сбой одного запроса не роняет остальные.
+      const r = await Promise.allSettled([
+        window.sb.from("subscriptions").select("plan,status,expires_at").eq("user_id", userId).maybeSingle(),
+        window.sb.from("plan_limits").select("*"),
+        window.sb.from("products").select("id", { count: "exact", head: true }).eq("user_id", userId),
+        window.sb.from("clients").select("id", { count: "exact", head: true }).eq("user_id", userId)
+      ]);
+      const val = function (i) { return r[i].status === "fulfilled" ? r[i].value : null; };
+
+      const sub = val(0);
+      if (sub && sub.data) {
         cache.plan = sub.data.plan || "basic";
         cache.status = sub.data.status || "active";
         cache.expires_at = sub.data.expires_at || null;
       }
-      const lim = await window.sb.from("plan_limits").select("*").eq("plan", cache.plan).maybeSingle();
-      cache.limits = lim.data || defaultLimits(cache.plan);
+      const lim = val(1);
+      const rows = (lim && lim.data) || [];
+      const row = rows.filter(function (x) { return x.plan === cache.plan; })[0];
+      cache.limits = row || defaultLimits(cache.plan);
 
-      const pc = await window.sb.from("products").select("id", { count: "exact", head: true }).eq("user_id", userId);
-      const cc = await window.sb.from("clients").select("id", { count: "exact", head: true }).eq("user_id", userId);
-      cache.productCount = pc.count || 0;
-      cache.clientCount = cc.count || 0;
+      const pc = val(2);
+      const cc = val(3);
+      cache.productCount = (pc && pc.count) || 0;
+      cache.clientCount = (cc && cc.count) || 0;
     } catch (e) { /* best-effort: остаются дефолты basic */ }
     return cache;
   }
