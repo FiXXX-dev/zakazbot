@@ -325,4 +325,27 @@ create table if not exists public.telegram_links (
 alter table public.telegram_links add column if not exists role text not null default 'manager';
 alter table public.telegram_links add column if not exists client_name text;
 alter table public.telegram_links add column if not exists file_format text not null default 'xlsx';
+-- Telegram-личность чата (заполняет бот) — чтобы менеджер в веб-кабинете узнавал,
+-- кто это, и привязывал чат к клиенту из базы.
+alter table public.telegram_links add column if not exists tg_username   text;
+alter table public.telegram_links add column if not exists tg_first_name text;
+alter table public.telegram_links add column if not exists tg_last_name  text;
+create index if not exists telegram_links_user_idx on public.telegram_links (user_id);
 alter table public.telegram_links enable row level security;
+
+-- Бот работает на service role (обходит RLS). Дополнительно разрешаем
+-- поставщику (владельцу аккаунта) читать и править СВОИ привязки из веб-кабинета:
+-- видеть @username Telegram-клиентов и задавать client_name (каноничное имя
+-- клиента из базы), чтобы бот подставлял его стандартный заказ и цены.
+-- Создание/удаление привязок остаётся за ботом (insert/delete не выдаём).
+drop policy if exists "tg_links owner select" on public.telegram_links;
+drop policy if exists "tg_links owner update" on public.telegram_links;
+
+create policy "tg_links owner select" on public.telegram_links
+  for select to authenticated
+  using (user_id = auth.uid() or public.is_admin());
+
+create policy "tg_links owner update" on public.telegram_links
+  for update to authenticated
+  using (user_id = auth.uid() or public.is_admin())
+  with check (user_id = auth.uid() or public.is_admin());

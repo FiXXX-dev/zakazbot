@@ -29,7 +29,7 @@ GPT-4o-mini выделяет позиции → менеджер правит т
 |---|---|
 | `index.html` + `js/orders.js` | Входящие заказы: поиск, фильтры (статус, сегодня/всё время), смена статуса, Excel, удаление |
 | `new-order.html` + `js/new-order.js` | Распознавание аудио/текста, редактируемая таблица позиций, Excel, сохранение |
-| `clients.html` + `js/clients.js` | Клиенты: поиск, история заказов, стандартный заказ («как обычно») |
+| `clients.html` + `js/clients.js` | Клиенты: поиск, история заказов, стандартный заказ («как обычно»); вкладка «Telegram-клиенты» — привязка ТГ-чатов (`telegram_links`) к клиентам базы |
 | `admin.html` + `js/admin.js` | Импорт товаров и клиентов из .csv/.xlsx (SheetJS) в `products` / `clients` (на текущего пользователя) |
 | `admin-dashboard.html` + `js/admin-dashboard.js` | Админка владельца: создание клиентов, выдача ACCESS_KEY (+копировать), управление планом/статусом. Пароль проверяет `clientauth` (секрет `ADMIN_PANEL_SECRET`), не в репозитории |
 | `settings.html` + `js/settings.js` | Тариф клиента: текущий план/даты, сравнение Basic/Pro, заявка на Upgrade (письмо админу) |
@@ -135,7 +135,10 @@ clients_accounts: id uuid, company_name, email, access_key (uniq, 16 симв.),
             (закрыта RLS; читает только service role в clientauth)
 telegram_links: chat_id (pk, bigint), user_id, company_name,
             role ('manager'|'customer'), client_name (кафе для customer),
-            pending_order jsonb, created_at   (только service role в tgbot)
+            file_format ('xlsx'|'csv'), tg_username, tg_first_name, tg_last_name,
+            pending_order jsonb, created_at
+            (бот — service role; владелец читает/правит свои строки: RLS
+             select/update по user_id = auth.uid() для вкладки «Telegram-клиенты»)
 ```
 
 У `orders`/`clients`/`products`/`order_logs` есть `user_id` (владелец строки).

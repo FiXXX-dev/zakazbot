@@ -165,6 +165,36 @@ async function getLink(chatId: number): Promise<any> {
   return data;
 }
 
+// Telegram-личность отправителя (msg.from / cb.from) для привязки в веб-кабинете.
+// deno-lint-ignore no-explicit-any
+function identityOf(from: any) {
+  return {
+    tg_username:   from && from.username   ? String(from.username)   : null,
+    tg_first_name: from && from.first_name ? String(from.first_name) : null,
+    tg_last_name:  from && from.last_name  ? String(from.last_name)  : null,
+  };
+}
+
+// Best-effort: сохраняем @username / имя чата. Не критично — не должно ломать
+// поток, если колонок ещё нет (миграция schema.sql не выполнена).
+// deno-lint-ignore no-explicit-any
+async function saveIdentity(chatId: number, from: any) {
+  if (!from) return;
+  try { await svc().from("telegram_links").update(identityOf(from)).eq("chat_id", chatId); }
+  catch (_e) { /* колонок может не быть до миграции */ }
+}
+
+// Обновляет личность только при изменении — чтобы не писать на каждое сообщение.
+// deno-lint-ignore no-explicit-any
+async function touchIdentity(chatId: number, link: any, from: any) {
+  if (!from) return;
+  const id = identityOf(from);
+  if (link.tg_username === id.tg_username &&
+      link.tg_first_name === id.tg_first_name &&
+      link.tg_last_name === id.tg_last_name) return;
+  await saveIdentity(chatId, from);
+}
+
 // Отправка файла документом в Telegram (multipart).
 async function tgDocument(chatId: number, filename: string, blob: Blob, caption: string, replyMarkup: unknown) {
   const fd = new FormData();
@@ -505,6 +535,9 @@ async function handle(update: any) {
   const text = (msg.text || "").trim();
   const link = await getLink(chatId);
 
+  // Поддерживаем @username / имя чата в актуальном виде (для привязки в вебе).
+  if (link && link.user_id) await touchIdentity(chatId, link, msg.from);
+
   // ── Ссылка-приглашение клиента: /start <customer_code> ──
   const startPayload = text.startsWith("/start ") ? text.slice(7).trim() : "";
   if (startPayload) {
@@ -515,6 +548,7 @@ async function handle(update: any) {
         chat_id: chatId, user_id: acct.data.user_id, company_name: acct.data.company_name,
         role: "customer", client_name: null, pending_order: null,
       }, { onConflict: "chat_id" });
+      await saveIdentity(chatId, msg.from);
       await tg("sendMessage", { chat_id: chatId,
         text: `Вы подключаетесь к поставщику «${acct.data.company_name}».\nНапишите название вашего заведения (например: Кафе Лагман).`,
         reply_markup: { remove_keyboard: true } });
@@ -547,6 +581,7 @@ async function handle(update: any) {
       chat_id: chatId, user_id: acct.data.user_id, company_name: acct.data.company_name,
       role: "manager", client_name: null, pending_order: null,
     }, { onConflict: "chat_id" });
+    await saveIdentity(chatId, msg.from);
     await setCommands();
     await tg("sendMessage", { chat_id: chatId, text:
       `Готово ✅ Чат привязан к «${acct.data.company_name}».\n\nПрисылайте голосовое сообщение или текст заказа — я разберу его в позиции.`,

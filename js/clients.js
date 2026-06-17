@@ -21,6 +21,7 @@
     tabs: document.getElementById("view-tabs"),
     tabAnalytics: document.getElementById("tab-analytics"),
     clientsView: document.getElementById("clients-view"),
+    telegramView: document.getElementById("telegram-view"),
     analyticsView: document.getElementById("analytics-view")
   };
 
@@ -63,10 +64,11 @@
 
   function switchView(view, btn) {
     els.tabs.querySelectorAll("button").forEach(function (b) { b.classList.toggle("active", b === btn); });
-    const analytics = view === "analytics";
-    els.clientsView.classList.toggle("hidden", analytics);
-    els.analyticsView.classList.toggle("hidden", !analytics);
-    if (analytics && window.Analytics) window.Analytics.render(els.analyticsView, userId);
+    els.clientsView.classList.toggle("hidden", view !== "clients");
+    els.telegramView.classList.toggle("hidden", view !== "telegram");
+    els.analyticsView.classList.toggle("hidden", view !== "analytics");
+    if (view === "analytics" && window.Analytics) window.Analytics.render(els.analyticsView, userId);
+    if (view === "telegram") loadTelegram();
   }
 
   async function loadClients() {
@@ -330,6 +332,137 @@
       unit: it.unit ? String(it.unit) : "шт",
       price: it.price == null || it.price === "" || isNaN(Number(it.price)) ? null : Number(it.price)
     };
+  }
+
+  // ── Telegram-клиенты (привязка ТГ-чатов к клиентам базы) ──
+  // Бот сохраняет @username/имя чата; здесь менеджер привязывает чат кафе к
+  // карточке клиента из базы → telegram_links.client_name (каноничное имя).
+  // Тогда бот подставляет стандартный заказ и цены этого клиента.
+
+  async function loadTelegram() {
+    els.telegramView.innerHTML = '<div class="msg msg-info"><span class="spinner"></span> Загрузка Telegram-клиентов…</div>';
+    const { data, error } = await window.sb
+      .from("telegram_links")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false });
+    if (error) {
+      els.telegramView.innerHTML = '<div class="msg msg-error">Не удалось загрузить Telegram-клиентов: ' + esc(error.message) + "</div>";
+      return;
+    }
+    renderTelegram(data || []);
+  }
+
+  function renderTelegram(links) {
+    els.telegramView.innerHTML = "";
+
+    const hint = document.createElement("p");
+    hint.className = "client-sub";
+    hint.textContent = "Чаты, подключённые к боту. Привяжите чат кафе к клиенту из базы — " +
+      "тогда бот будет подставлять его стандартный заказ и цены.";
+    els.telegramView.appendChild(hint);
+
+    if (!links.length) {
+      const m = document.createElement("div");
+      m.className = "msg msg-info";
+      m.textContent = "Пока никто не подключился через Telegram. Отправьте кафе ссылку-приглашение из админ-панели, а менеджеру — ключ доступа.";
+      els.telegramView.appendChild(m);
+      return;
+    }
+    links.forEach(function (l) { els.telegramView.appendChild(tgCard(l)); });
+  }
+
+  function tgCard(l) {
+    const card = document.createElement("div");
+    card.className = "card";
+    const isCustomer = l.role === "customer";
+    const display = [l.tg_first_name, l.tg_last_name].filter(Boolean).join(" ") ||
+      (isCustomer ? "Кафе" : "Менеджер");
+    const uname = l.tg_username ? "@" + l.tg_username : "username не указан";
+    const roleLabel = isCustomer ? "Кафе" : "Менеджер";
+    const roleBadge = isCustomer ? "badge-processing" : "badge-new";
+    const unameHtml = l.tg_username
+      ? '<a href="https://t.me/' + esc(l.tg_username) + '" target="_blank" rel="noopener">' + esc(uname) + "</a>"
+      : esc(uname);
+
+    card.innerHTML =
+      '<div class="client-head">' +
+        "<div>" +
+          '<div class="client-name">' + esc(display) +
+            ' <span class="badge ' + roleBadge + '">' + roleLabel + "</span></div>" +
+          '<div class="client-sub">' + unameHtml + " · чат " + esc(String(l.chat_id)) + "</div>" +
+        "</div>" +
+      "</div>" +
+      '<div class="tg-bind" style="margin-top:12px"></div>';
+
+    const bind = card.querySelector(".tg-bind");
+
+    if (!isCustomer) {
+      // Менеджер-оператор определяет клиента по речи — фиксированная привязка не нужна.
+      const note = document.createElement("p");
+      note.className = "client-sub";
+      note.style.margin = "0";
+      note.textContent = "Менеджер-оператор поставщика. Клиента бот определяет по речи — привязка не требуется.";
+      bind.appendChild(note);
+      return card;
+    }
+
+    const label = document.createElement("label");
+    label.textContent = "Клиент в базе:";
+    label.style.marginRight = "8px";
+    const sel = tgClientSelect(l.client_name);
+    const msg = document.createElement("span");
+    msg.style.marginLeft = "10px";
+    msg.style.fontSize = "13px";
+
+    sel.addEventListener("change", async function () {
+      const val = sel.value;
+      sel.disabled = true;
+      msg.textContent = "Сохранение…";
+      const { error } = await window.sb
+        .from("telegram_links")
+        .update({ client_name: val || null })
+        .eq("chat_id", l.chat_id);
+      sel.disabled = false;
+      if (error) {
+        msg.innerHTML = '<span style="color:var(--danger)">Ошибка: ' + esc(error.message) + "</span>";
+        return;
+      }
+      l.client_name = val || null;
+      msg.innerHTML = '<span style="color:var(--ok)">Сохранено ✓</span>';
+    });
+
+    bind.appendChild(label);
+    bind.appendChild(sel);
+    bind.appendChild(msg);
+    return card;
+  }
+
+  // Выпадающий список клиентов базы; current — текущее client_name привязки.
+  function tgClientSelect(current) {
+    const sel = document.createElement("select");
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = "— не привязан —";
+    sel.appendChild(none);
+
+    let found = false;
+    clients.forEach(function (c) {
+      const o = document.createElement("option");
+      o.value = c.name;
+      o.textContent = c.name;
+      if (current && c.name === current) { o.selected = true; found = true; }
+      sel.appendChild(o);
+    });
+    // client_name задан, но такого клиента нет в базе — показываем как есть.
+    if (current && !found) {
+      const o = document.createElement("option");
+      o.value = current;
+      o.textContent = current + " (нет в базе)";
+      o.selected = true;
+      sel.appendChild(o);
+    }
+    return sel;
   }
 
   // ── Форма добавления/редактирования ──
