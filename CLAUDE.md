@@ -36,7 +36,7 @@ GPT-4o-mini выделяет позиции → менеджер правит т
 | `js/supabase-client.js` | Создаёт `window.sb` (клиент Supabase) |
 | `js/auth.js` | `window.Auth` — вход клиента по ACCESS_KEY (`keyLogin`/`guard`): нет сессии → форма ключа вместо контента; инъекция «Тариф»/«Выйти». Гард грузит `Plan` и рисует баннеры |
 | `js/plan.js` | `window.Plan` — загрузка подписки + `plan_limits` (фичефлаги/лимиты), `isPro()`, `has(feature)`, баннеры лимитов |
-| `js/analytics.js` | `window.Analytics.render()` — графики (Chart.js) на вкладке «Аналитика» (только Pro) |
+| `js/analytics.js` | `window.Analytics.render()` — дашборд (Chart.js) на вкладке «Аналитика» (только Pro): фильтр периода 30/90/всё, KPI (заказы/выручка/средний чек/клиенты), выручка и заказы по дням, статусы, топы клиентов/товаров по выручке |
 | `js/dictionary.js` | `window.ZakazDictionary` — словарь (числительные, единицы, исправления, маркеры самоисправлений, имена сотрудников `managerNames`), оба алфавита. ДАННЫЕ, пополняется без правки кода |
 | `js/normalize.js` | `window.Normalizer.normalizeTranscript()` — этап между Whisper и GPT |
 | `js/client-detect.js` | `window.ClientDetect.pickClient()` — выбор клиента из нескольких имён (база/приветствия/сотрудники). Чистая логика, тесты в `tests/` |
