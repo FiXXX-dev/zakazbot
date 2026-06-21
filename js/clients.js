@@ -322,6 +322,65 @@
       c.standard_order = cleaned;
       msg.innerHTML = '<div class="msg msg-success">Стандартный заказ сохранён.</div>';
     });
+
+    // Импорт из файла: парсим .xlsx/.csv и добавляем позиции в таблицу
+    // (не сохраняя — пользователь проверяет и жмёт «Сохранить»).
+    const imp = document.createElement("div");
+    imp.style.cssText = "margin:8px 0 4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap";
+    const impFile = document.createElement("input");
+    impFile.type = "file";
+    impFile.accept = ".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv";
+    impFile.style.maxWidth = "260px";
+    const impBtn = document.createElement("button");
+    impBtn.type = "button";
+    impBtn.className = "btn btn-outline btn-sm";
+    impBtn.textContent = "Загрузить из файла";
+    const impHint = document.createElement("span");
+    impHint.className = "client-sub";
+    impHint.textContent = "Колонки: Наименование, Количество, Ед.изм., Цена (цена необязательна)";
+    imp.appendChild(impFile);
+    imp.appendChild(impBtn);
+    imp.appendChild(impHint);
+    box.insertBefore(imp, wrap);
+
+    impBtn.addEventListener("click", async function () {
+      const file = impFile.files[0];
+      if (!file) { msg.innerHTML = '<div class="msg msg-warn">Выберите файл (.csv или .xlsx).</div>'; return; }
+      if (typeof XLSX === "undefined") {
+        msg.innerHTML = '<div class="msg msg-error">Библиотека для чтения файлов не загрузилась (проверьте доступ к CDN).</div>';
+        return;
+      }
+      impBtn.disabled = true;
+      try {
+        const rows = await readStdRows(file);
+        let added = 0, skipped = 0;
+        rows.forEach(function (r) {
+          const name = String(pickCol(r, ["Наименование", "Название", "Товар", "name"]) || "").trim();
+          if (!name) { skipped++; return; }
+          const it = normalizeStdItem({
+            name: name,
+            qty: parseNum(pickCol(r, ["Количество", "Кол-во", "Кол", "qty", "Quantity"])),
+            unit: String(pickCol(r, ["Ед.изм.", "Единица", "Единица измерения", "unit"]) || "").trim() || "шт",
+            price: parseNum(pickCol(r, ["Цена", "price"]))
+          });
+          std.push(it);
+          addRow(it);
+          added++;
+        });
+        if (added) {
+          msg.innerHTML = '<div class="msg msg-success">Добавлено позиций из файла: ' + added +
+            (skipped ? " (пропущено без названия: " + skipped + ")" : "") +
+            ". Проверьте таблицу и нажмите «Сохранить стандартный заказ».</div>";
+        } else {
+          msg.innerHTML = '<div class="msg msg-warn">Не найдено ни одной позиции. Проверьте, что в первой строке файла есть колонка «Наименование».</div>';
+        }
+        impFile.value = "";
+      } catch (e) {
+        msg.innerHTML = '<div class="msg msg-error">Ошибка чтения файла: ' + esc(e && e.message ? e.message : String(e)) + "</div>";
+      } finally {
+        impBtn.disabled = false;
+      }
+    });
   }
 
   function normalizeStdItem(it) {
@@ -332,6 +391,35 @@
       unit: it.unit ? String(it.unit) : "шт",
       price: it.price == null || it.price === "" || isNaN(Number(it.price)) ? null : Number(it.price)
     };
+  }
+
+  // ── Импорт стандартного заказа из файла (.xlsx/.csv через SheetJS) ──
+
+  async function readStdRows(file) {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(new Uint8Array(buf), { type: "array" });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    return ws ? XLSX.utils.sheet_to_json(ws, { defval: "" }) : [];
+  }
+
+  // Значение строки по одному из возможных заголовков (без учёта регистра/пробелов).
+  function pickCol(row, candidates) {
+    const keys = Object.keys(row);
+    for (let i = 0; i < candidates.length; i++) {
+      const want = candidates[i].trim().toLowerCase();
+      for (let j = 0; j < keys.length; j++) {
+        if (keys[j].trim().toLowerCase() === want) return row[keys[j]];
+      }
+    }
+    return undefined;
+  }
+
+  // «1 200,5» → 1200.5; пусто/мусор → null.
+  function parseNum(v) {
+    if (v == null || v === "") return null;
+    if (typeof v === "number") return isFinite(v) ? v : null;
+    const n = Number(String(v).replace(/\s/g, "").replace(",", "."));
+    return isFinite(n) ? n : null;
   }
 
   // ── Telegram-клиенты (привязка ТГ-чатов к клиентам базы) ──
