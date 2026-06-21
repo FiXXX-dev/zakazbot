@@ -1,7 +1,7 @@
 // Supabase Edge Function: clientauth
 //
-// Вход клиентов по ACCESS_KEY и админ-операции (создание/список/обновление
-// клиентов). Все привилегированные действия выполняются на service-role и
+// Вход клиентов по ACCESS_KEY и админ-операции (создание/список/обновление/
+// удаление клиентов). Все привилегированные действия выполняются на service-role и
 // защищены секретом ADMIN_PANEL_SECRET. Таблица clients_accounts закрыта RLS,
 // поэтому ключи доступа НЕ читаются публичным anon-ключом.
 //
@@ -151,6 +151,25 @@ Deno.serve(async (req: Request): Promise<Response> => {
         if (patch.status) subPatch.status = patch.status === "active" ? "active" : "expired";
         if (Object.keys(subPatch).length) await svc.from("subscriptions").update(subPatch).eq("user_id", row.user_id);
       }
+      return json({ ok: true });
+    }
+
+    if (action === "admin_delete") {
+      const id = String(body.id ?? "");
+      if (!id) return json({ error: "Не указан id" }, 400);
+      const { data: acct, error: aErr } = await svc
+        .from("clients_accounts").select("user_id").eq("id", id).maybeSingle();
+      if (aErr) return json({ error: aErr.message }, 500);
+      if (!acct) return json({ error: "Аккаунт не найден" }, 404);
+      // Удаляем auth-пользователя — каскад (on delete cascade по user_id) снесёт
+      // его данные: orders / clients / products / order_logs / subscriptions /
+      // telegram_links и саму строку clients_accounts.
+      if (acct.user_id) {
+        const { error: dErr } = await svc.auth.admin.deleteUser(acct.user_id);
+        if (dErr) return json({ error: dErr.message }, 500);
+      }
+      // На случай user_id = null (каскад не сработает) — удаляем строку явно.
+      await svc.from("clients_accounts").delete().eq("id", id);
       return json({ ok: true });
     }
 

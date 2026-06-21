@@ -60,6 +60,19 @@
       <button type="button" id="clients-btn" class="btn">Загрузить клиентов</button>
       <div id="clients-msg"></div>
     </section>
+
+    <section class="card">
+      <div class="order-actions" style="justify-content:space-between;align-items:center;margin:0 0 6px">
+        <h2 style="margin:0">Мои товары</h2>
+        <button type="button" id="products-clear" class="btn btn-danger btn-sm" style="display:none">Удалить все</button>
+      </div>
+      <p class="client-sub" style="margin-top:0">
+        Загруженные товары из таблицы <code>products</code> — их подставляет бот для цен.
+        Здесь можно посмотреть и удалить ненужные.
+      </p>
+      <input type="search" id="products-search" placeholder="Поиск по названию…" style="width:100%;margin-bottom:10px">
+      <div id="products-list"></div>
+    </section>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>

@@ -30,8 +30,8 @@ GPT-4o-mini выделяет позиции → менеджер правит т
 | `index.html` + `js/orders.js` | Входящие заказы: поиск, фильтры (статус, сегодня/всё время), смена статуса, Excel, удаление |
 | `new-order.html` + `js/new-order.js` | Распознавание аудио/текста, редактируемая таблица позиций, Excel, сохранение |
 | `clients.html` + `js/clients.js` | Клиенты: поиск, история заказов, стандартный заказ («как обычно»); вкладка «Telegram-клиенты» — привязка ТГ-чатов (`telegram_links`) к клиентам базы |
-| `admin.html` + `js/admin.js` | Импорт товаров и клиентов из .csv/.xlsx (SheetJS) в `products` / `clients` (на текущего пользователя) |
-| `admin-dashboard.html` + `js/admin-dashboard.js` | Админка владельца: создание клиентов, выдача ACCESS_KEY (+копировать), управление планом/статусом. Пароль проверяет `clientauth` (секрет `ADMIN_PANEL_SECRET`), не в репозитории |
+| `admin.html` + `js/admin.js` | Импорт товаров и клиентов из .csv/.xlsx (SheetJS) в `products` / `clients` (на текущего пользователя); список «Мои товары» — просмотр/поиск/удаление товаров |
+| `admin-dashboard.html` + `js/admin-dashboard.js` | Админка владельца: создание клиентов, выдача ACCESS_KEY (+копировать), управление планом/статусом, удаление клиента (каскадом все его данные). Пароль проверяет `clientauth` (секрет `ADMIN_PANEL_SECRET`), не в репозитории |
 | `settings.html` + `js/settings.js` | Тариф клиента: текущий план/даты, сравнение Basic/Pro, заявка на Upgrade (письмо админу) |
 | `js/supabase-client.js` | Создаёт `window.sb` (клиент Supabase) |
 | `js/auth.js` | `window.Auth` — вход клиента по ACCESS_KEY (`keyLogin`/`guard`): нет сессии → форма ключа вместо контента; инъекция «Тариф»/«Выйти». Гард грузит `Plan` и рисует баннеры |

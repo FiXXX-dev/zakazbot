@@ -151,11 +151,12 @@
         '<td class="key-cell"><code class="key-code">' + esc(c.access_key) + "</code>" +
           '<button type="button" class="btn btn-outline btn-sm key-copy" data-key="' + esc(c.access_key) + '">Скопировать</button></td>' +
         '<td class="key-cell">' + inviteCell(c) + "</td>" +
+        '<td><button type="button" class="btn btn-danger btn-sm del-acct" data-id="' + esc(c.id) + '" data-company="' + esc(c.company_name) + '">Удалить</button></td>' +
         "</tr>";
     }).join("");
     els.table.innerHTML =
       '<div class="table-wrap"><table class="items-table"><thead><tr>' +
-        "<th>Компания</th><th>План</th><th>Статус</th><th>Создан</th><th>Ключ доступа</th><th>Ссылка для клиентов (Telegram)</th>" +
+        "<th>Компания</th><th>План</th><th>Статус</th><th>Создан</th><th>Ключ доступа</th><th>Ссылка для клиентов (Telegram)</th><th></th>" +
       "</tr></thead><tbody>" + rows + "</tbody></table></div>";
 
     els.table.querySelectorAll(".key-copy").forEach(function (btn) {
@@ -170,6 +171,26 @@
     els.table.querySelectorAll(".status-sel").forEach(function (sel) {
       sel.addEventListener("change", function () { update(sel.dataset.id, { status: sel.value }); });
     });
+    els.table.querySelectorAll(".del-acct").forEach(function (btn) {
+      btn.addEventListener("click", function () { removeClient(btn.dataset.id, btn.dataset.company); });
+    });
+  }
+
+  // Полное удаление компании: каскадом удаляются её заказы, товары, клиенты,
+  // подписка и Telegram-привязки (см. admin_delete в clientauth). Необратимо.
+  async function removeClient(id, company) {
+    if (!confirm(
+      "Удалить клиента «" + company + "»?\n\n" +
+      "Будут БЕЗВОЗВРАТНО удалены: аккаунт и ключ доступа, все заказы, товары, " +
+      "клиенты и Telegram-привязки этой компании.\n\nДействие необратимо."
+    )) return;
+    try {
+      await callFn({ action: "admin_delete", id: id });
+      loadClients().catch(function () {});
+    } catch (e) {
+      if (e.status === 401) { lock(); return; }
+      alert("Не удалось удалить: " + e.message);
+    }
   }
 
   async function update(id, patch) {
