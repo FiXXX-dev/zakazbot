@@ -257,6 +257,13 @@ textarea.small { min-height: 60px; }
   outline-offset: 0;
 }
 
+/* Админка владельца: селекты «План»/«Статус» в таблице клиентов не сжимаем,
+   чтобы текст («Pro», «Активен») был виден целиком даже с колонкой «Удалить».
+   Таблице даём запас ширины — при нехватке места .table-wrap прокрутится. */
+.plan-sel { width: auto; min-width: 78px; }
+.status-sel { width: auto; min-width: 104px; }
+#clients-table .items-table { min-width: 760px; }
+
 /* Жёлтая подсветка строк, требующих уточнения (confidence=low или qty=null) */
 tr.row-warn td {
   background: var(--warn-bg);
