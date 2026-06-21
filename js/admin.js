@@ -10,10 +10,14 @@
     pMsg: document.getElementById("products-msg"),
     cFile: document.getElementById("clients-file"),
     cBtn: document.getElementById("clients-btn"),
-    cMsg: document.getElementById("clients-msg")
+    cMsg: document.getElementById("clients-msg"),
+    pSearch: document.getElementById("products-search"),
+    pList: document.getElementById("products-list"),
+    pClear: document.getElementById("products-clear")
   };
 
   let userId = null;
+  let products = [];
 
   boot();
 
@@ -33,6 +37,11 @@
   }
 
   function init() {
+    // Просмотр/удаление товаров не требует SheetJS — подключаем до проверки.
+    els.pSearch.addEventListener("input", renderProducts);
+    els.pClear.addEventListener("click", clearAllProducts);
+    loadProducts();
+
     if (typeof XLSX === "undefined") {
       els.setup.innerHTML =
         '<div class="msg msg-error">Библиотека SheetJS не загрузилась (проверьте доступ к CDN). Чтение файлов недоступно.</div>';
@@ -42,6 +51,78 @@
     }
     els.pBtn.addEventListener("click", importProducts);
     els.cBtn.addEventListener("click", importClients);
+  }
+
+  // ── Просмотр и удаление товаров (таблица products, RLS по user_id) ──
+
+  async function loadProducts() {
+    els.pList.innerHTML = '<div class="msg msg-info"><span class="spinner"></span> Загрузка товаров…</div>';
+    const { data, error } = await window.sb
+      .from("products").select("*").eq("user_id", userId).order("name", { ascending: true });
+    if (error) {
+      els.pList.innerHTML = '<div class="msg msg-error">Не удалось загрузить товары: ' + esc(error.message) + "</div>";
+      return;
+    }
+    products = data || [];
+    renderProducts();
+  }
+
+  function renderProducts() {
+    const q = (els.pSearch.value || "").trim().toLowerCase();
+    els.pClear.style.display = products.length ? "" : "none";
+    if (!products.length) {
+      els.pList.innerHTML = '<div class="msg msg-info">Товаров пока нет. Загрузите файл выше.</div>';
+      return;
+    }
+    const list = products.filter(function (p) {
+      return !q || String(p.name || "").toLowerCase().indexOf(q) !== -1;
+    });
+    if (!list.length) {
+      els.pList.innerHTML = '<div class="msg msg-info">Ничего не найдено по запросу «' + esc(q) + "».</div>";
+      return;
+    }
+    const head = '<div class="client-sub" style="margin-bottom:6px">Всего товаров: ' + products.length +
+      (q ? " · показано: " + list.length : "") + "</div>";
+    const rows = list.map(function (p) {
+      return "<tr>" +
+        "<td>" + esc(p.name) + "</td>" +
+        "<td>" + esc(p.unit || "") + "</td>" +
+        "<td>" + (p.price == null ? "" : esc(fmtPrice(p.price))) + "</td>" +
+        '<td><button type="button" class="row-del del-prod" data-id="' + esc(p.id) + '" title="Удалить">×</button></td>' +
+        "</tr>";
+    }).join("");
+    els.pList.innerHTML = head +
+      '<div class="table-wrap"><table class="items-table"><thead><tr>' +
+        "<th>Наименование</th><th>Ед.изм.</th><th>Цена</th><th></th>" +
+      "</tr></thead><tbody>" + rows + "</tbody></table></div>";
+
+    els.pList.querySelectorAll(".del-prod").forEach(function (btn) {
+      btn.addEventListener("click", function () { deleteProduct(btn.dataset.id); });
+    });
+  }
+
+  async function deleteProduct(id) {
+    const p = products.find(function (x) { return String(x.id) === String(id); });
+    if (!confirm('Удалить товар «' + (p ? p.name : "") + '»?')) return;
+    const { error } = await window.sb.from("products").delete().eq("id", id);
+    if (error) { alert("Не удалось удалить: " + error.message); return; }
+    products = products.filter(function (x) { return String(x.id) !== String(id); });
+    renderProducts();
+  }
+
+  async function clearAllProducts() {
+    if (!confirm("Удалить ВСЕ товары (" + products.length + ")? Действие необратимо.")) return;
+    els.pClear.disabled = true;
+    const { error } = await window.sb.from("products").delete().eq("user_id", userId);
+    els.pClear.disabled = false;
+    if (error) { alert("Не удалось удалить: " + error.message); return; }
+    products = [];
+    renderProducts();
+  }
+
+  function fmtPrice(n) {
+    const v = Number(n);
+    return isFinite(v) ? v.toLocaleString("ru-RU") : String(n);
   }
 
   // Файл (.xlsx/.csv) → массив объектов-строк, ключи — заголовки первой строки.
@@ -126,6 +207,7 @@
       show(els.pMsg, "success", "Добавлено товаров: " + added +
         (skipped ? ". Пропущено строк без названия: " + skipped : "") + ".");
       els.pFile.value = "";
+      loadProducts();
     } catch (e) {
       show(els.pMsg, "error", "Ошибка: " + esc(e && e.message ? e.message : String(e)));
     } finally {
