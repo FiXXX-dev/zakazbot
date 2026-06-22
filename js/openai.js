@@ -11,7 +11,7 @@
 
 (function () {
   const SYSTEM_PROMPT = `Ты — система распознавания заказов для поставщика HoReCa.
-Клиент диктует заказ на русском, узбекском или смешанном русско-узбекском языке.
+Клиент диктует заказ на русском, узбекском, смешанном русско-узбекском или другом языке.
 Текст уже прошёл предварительную нормализацию (числительные приведены к цифрам).
 Извлеки список товаров и верни ТОЛЬКО валидный JSON:
 {
@@ -28,6 +28,7 @@
       "confidence": "high/medium/low",
       "confidence_score": 0-100,
       "corrected": true/false,
+      "in_catalog": true/false,
       "note": "пометка если что-то неясно"
     }
   ]
@@ -43,7 +44,13 @@
 - Не придумывай количество если не сказано — ставь qty=null и понижай confidence_score.
 - ПРАВИЛО МОДИФИКАЦИИ: Клиент может ссылаться на прошлый или стандартный заказ разными способами: «как обычно», «как вчера», «как всегда», «повтори прошлый», «помнишь прошлый заказ», «на прошлой неделе брали», «стандартный наш», «odatdagidek» и т.д. Во всех этих случаях ставь repeat_last_order=true — за основу берётся стандартный заказ клиента из базы.
 Если вместе с этим клиент указывает изменения — найди нужную позицию в стандартном заказе и ИЗМЕНИ её количество или убери её. НИКОГДА не добавляй дубль — если товар уже есть в списке (даже под похожим названием), только обновляй его, не создавай новую строку.
-Если клиент убирает товар («убери», «не нужно», «больше не берём») — верни эту позицию с qty=0.`;
+Если клиент убирает товар («убери», «не нужно», «больше не берём») — верни эту позицию с qty=0.
+- КАТАЛОГ ТОВАРОВ. Если отдельным системным сообщением передан КАТАЛОГ доступных товаров — сопоставляй каждую позицию строго с ним:
+  • поле "name" пиши ТОЧНО как в каталоге (буква в букву), даже если клиент сказал на другом языке, сократил или ошибся; один товар на разных языках («стакан», «stakan», «cup», «杯子») → одно и то же каталожное название;
+  • уверенно сопоставил — "in_catalog": true; в каталоге нет подходящего товара — НЕ выдумывай каталожное имя и НЕ выбрасывай позицию: оставь название как сказал клиент, "in_catalog": false, "confidence":"low", note "нет в каталоге";
+  • соответствие неоднозначно (несколько похожих) — выбери наиболее вероятный, "in_catalog": true, "confidence":"low";
+  • единицу для сопоставленного товара бери из каталога, если она там указана.
+Если каталог НЕ передан — ставь "in_catalog": true для всех распознанных позиций и работай как обычно.`;
 
   const OPENAI_API = "https://api.openai.com/v1";
 
@@ -137,9 +144,30 @@
     return data.text || "";
   }
 
+  // Каталог товаров клиента → отдельное system-сообщение для привязки названий
+  // (ограничиваем размер, чтобы не раздувать промпт). Дублируется в openaiproxy.
+  const CATALOG_LIMIT = 600;
+  function catalogMessage(catalog) {
+    if (!Array.isArray(catalog) || !catalog.length) return null;
+    const list = [];
+    for (let i = 0; i < catalog.length && list.length < CATALOG_LIMIT; i++) {
+      const c = catalog[i];
+      const name = c && c.name ? String(c.name).trim() : "";
+      if (!name) continue;
+      list.push(c && c.unit ? { name: name, unit: String(c.unit) } : { name: name });
+    }
+    if (!list.length) return null;
+    return 'КАТАЛОГ ТОВАРОВ (сопоставляй строго с этими названиями; "name" в ответе — точно как здесь, если товар есть в каталоге):\n' + JSON.stringify(list);
+  }
+
   // Текст заказа → структура { client_name, client_comment, repeat_last_order, urgent, items[] }.
-  async function parseOrder(text) {
+  // catalog (необязательно) — массив { name, unit } товаров клиента для привязки названий.
+  async function parseOrder(text, catalog) {
     if (mode() === "direct") {
+      const messages = [{ role: "system", content: SYSTEM_PROMPT }];
+      const catMsg = catalogMessage(catalog);
+      if (catMsg) messages.push({ role: "system", content: catMsg });
+      messages.push({ role: "user", content: text });
       const resp = await fetch(OPENAI_API + "/chat/completions", {
         method: "POST",
         headers: {
@@ -150,10 +178,7 @@
           model: "gpt-4o-mini",
           temperature: 0,
           response_format: { type: "json_object" },
-          messages: [
-            { role: "system", content: SYSTEM_PROMPT },
-            { role: "user", content: text }
-          ]
+          messages: messages
         })
       });
       const data = await readJson(resp);
@@ -166,7 +191,7 @@
     const data = await edgeRequest({
       method: "POST",
       headers: edgeHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ action: "parse", text: text })
+      body: JSON.stringify({ action: "parse", text: text, catalog: Array.isArray(catalog) ? catalog : [] })
     });
     if (data.result) return data.result;
     throw new Error("Edge Function не вернула результат разбора.");
