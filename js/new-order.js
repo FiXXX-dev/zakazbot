@@ -125,8 +125,18 @@
   // Каталог товаров — для подстановки цены по названию позиции (best-effort).
   async function loadProducts() {
     if (!window.sb) return;
-    const { data, error } = await window.sb.from("products").select("name, unit, price").eq("user_id", userId);
+    const { data, error } = await window.sb.from("products").select("name, unit, price, article").eq("user_id", userId);
     if (!error && data) productsCache = data;
+  }
+
+  // Каталог { name, unit, article? } для привязки названий моделью при разборе заказа.
+  function catalogForPrompt() {
+    return (productsCache || []).map(function (p) {
+      const e = { name: p.name };
+      if (p.unit) e.unit = p.unit;
+      if (p.article) e.article = p.article;
+      return e;
+    });
   }
 
   // Подставляет цену из каталога для позиций без цены — только при однозначном
@@ -136,7 +146,7 @@
     if (!window.OrderMerge || !productsCache.length) return list;
     (list || []).forEach(function (it) {
       if (it.price != null) return; // вписанную/распознанную цену не меняем
-      const p = window.OrderMerge.matchProduct(it.name, productsCache);
+      const p = window.OrderMerge.matchProduct(it.name, productsCache, it.article);
       if (p && p.price != null && p.price !== "") {
         it.price = Number(p.price);
         it.note = it.note ? it.note + " · цена из каталога" : "цена из каталога";
@@ -340,7 +350,7 @@
       };
 
       setBusy("Разбираю заказ (GPT-4o-mini)…");
-      const parsed = await window.AI.parseOrder(norm.text);
+      const parsed = await window.AI.parseOrder(norm.text, catalogForPrompt());
       await applyParsed(parsed || {});
 
       if (!items.length) {
@@ -490,6 +500,8 @@
       : deriveScore(confidence, qty, corrected);
     if (qty == null) score = Math.min(score, 50); // нет количества — позиция неполная
     if (corrected) score = Math.min(score, 70);   // было самоисправление — перепроверить
+    const inCatalog = it.in_catalog === false ? false : true;
+    if (!inCatalog) score = Math.min(score, 50);  // нет в каталоге — перепроверить
     return {
       name: it.name ? String(it.name) : "",
       qty: qty,
@@ -498,6 +510,8 @@
       confidence: confidence,
       confidence_score: Math.round(score),
       corrected: corrected,
+      in_catalog: inCatalog,
+      article: it.article ? String(it.article) : null,
       note: it.note ? String(it.note) : ""
     };
   }
@@ -524,6 +538,7 @@
     return item.qty == null ||
       item.confidence === "low" ||
       item.corrected === true ||
+      item.in_catalog === false ||
       (typeof item.confidence_score === "number" && item.confidence_score < REVIEW_THRESHOLD);
   }
 
@@ -531,6 +546,7 @@
   function reviewReasons(item) {
     const r = [];
     if (item.qty == null) r.push("нет количества");
+    if (item.in_catalog === false) r.push("нет в каталоге");
     if (item.corrected === true) r.push("было самоисправление");
     if (item.confidence === "low" ||
         (typeof item.confidence_score === "number" && item.confidence_score < REVIEW_THRESHOLD)) {
@@ -608,6 +624,7 @@
       item.confidence = "high";
       item.confidence_score = 100;
       item.corrected = false;
+      item.in_catalog = true;
       item.note = "";
       noteDiv.textContent = "";
       refreshRowState();

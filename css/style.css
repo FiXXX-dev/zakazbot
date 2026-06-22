@@ -257,6 +257,13 @@ textarea.small { min-height: 60px; }
   outline-offset: 0;
 }
 
+/* Админка владельца: селекты «План»/«Статус» в таблице клиентов не сжимаем,
+   чтобы текст («Pro», «Активен») был виден целиком даже с колонкой «Удалить».
+   Таблице даём запас ширины — при нехватке места .table-wrap прокрутится. */
+.plan-sel { width: auto; min-width: 78px; }
+.status-sel { width: auto; min-width: 104px; }
+#clients-table .items-table { min-width: 760px; }
+
 /* Жёлтая подсветка строк, требующих уточнения (confidence=low или qty=null) */
 tr.row-warn td {
   background: var(--warn-bg);
@@ -296,6 +303,31 @@ tr.row-warn td {
   cursor: pointer;
 }
 .tabs button.active { background: var(--accent); color: #fff; }
+
+/* ── Аналитика (Pro) ─────────────────────────────────────── */
+.analytics-controls { margin-bottom: 14px; }
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.kpi {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fff;
+  padding: 14px 16px;
+}
+.kpi-label { color: var(--muted); font-size: 13px; }
+.kpi-value { font-size: 22px; font-weight: 700; margin-top: 4px; }
+.charts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+}
+.charts-grid > .card { margin: 0; }
+.charts-grid .chart-wide { grid-column: 1 / -1; }
+.charts-grid .card h3 { margin: 0 0 10px; font-size: 15px; }
 
 .transcript {
   background: #f6f8f9;

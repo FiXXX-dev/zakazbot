@@ -29,14 +29,14 @@ GPT-4o-mini выделяет позиции → менеджер правит т
 |---|---|
 | `index.html` + `js/orders.js` | Входящие заказы: поиск, фильтры (статус, сегодня/всё время), смена статуса, Excel, удаление |
 | `new-order.html` + `js/new-order.js` | Распознавание аудио/текста, редактируемая таблица позиций, Excel, сохранение |
-| `clients.html` + `js/clients.js` | Клиенты: поиск, история заказов, стандартный заказ («как обычно») |
-| `admin.html` + `js/admin.js` | Импорт товаров и клиентов из .csv/.xlsx (SheetJS) в `products` / `clients` (на текущего пользователя) |
-| `admin-dashboard.html` + `js/admin-dashboard.js` | Админка владельца: создание клиентов, выдача ACCESS_KEY (+копировать), управление планом/статусом. Пароль проверяет `clientauth` (секрет `ADMIN_PANEL_SECRET`), не в репозитории |
+| `clients.html` + `js/clients.js` | Клиенты: поиск, история заказов, стандартный заказ («как обычно», вводится вручную или импортом из .csv/.xlsx через SheetJS); вкладка «Telegram-клиенты» — привязка ТГ-чатов (`telegram_links`) к клиентам базы |
+| `admin.html` + `js/admin.js` | Импорт товаров и клиентов из .csv/.xlsx (SheetJS) в `products` / `clients` (на текущего пользователя); список «Мои товары» — просмотр/поиск/удаление товаров |
+| `admin-dashboard.html` + `js/admin-dashboard.js` | Админка владельца: создание клиентов, выдача ACCESS_KEY (+копировать), управление планом/статусом, удаление клиента (каскадом все его данные). Пароль проверяет `clientauth` (секрет `ADMIN_PANEL_SECRET`), не в репозитории |
 | `settings.html` + `js/settings.js` | Тариф клиента: текущий план/даты, сравнение Basic/Pro, заявка на Upgrade (письмо админу) |
 | `js/supabase-client.js` | Создаёт `window.sb` (клиент Supabase) |
 | `js/auth.js` | `window.Auth` — вход клиента по ACCESS_KEY (`keyLogin`/`guard`): нет сессии → форма ключа вместо контента; инъекция «Тариф»/«Выйти». Гард грузит `Plan` и рисует баннеры |
 | `js/plan.js` | `window.Plan` — загрузка подписки + `plan_limits` (фичефлаги/лимиты), `isPro()`, `has(feature)`, баннеры лимитов |
-| `js/analytics.js` | `window.Analytics.render()` — графики (Chart.js) на вкладке «Аналитика» (только Pro) |
+| `js/analytics.js` | `window.Analytics.render()` — дашборд (Chart.js) на вкладке «Аналитика» (только Pro): фильтр периода 30/90/всё, KPI (заказы/выручка/средний чек/клиенты), выручка и заказы по дням, статусы, топы клиентов/товаров по выручке |
 | `js/dictionary.js` | `window.ZakazDictionary` — словарь (числительные, единицы, исправления, маркеры самоисправлений, имена сотрудников `managerNames`), оба алфавита. ДАННЫЕ, пополняется без правки кода |
 | `js/normalize.js` | `window.Normalizer.normalizeTranscript()` — этап между Whisper и GPT |
 | `js/client-detect.js` | `window.ClientDetect.pickClient()` — выбор клиента из нескольких имён (база/приветствия/сотрудники). Чистая логика, тесты в `tests/` |
@@ -71,6 +71,12 @@ GPT-4o-mini выделяет позиции → менеджер правит т
    Любые изменения промпта вносить во все три файла синхронно.
    Аналогично нормализация: `js/dictionary.js`+`js/normalize.js` (фронт) и
    `supabase/functions/tgbot/normalize.ts` (порт для бота) — держать в синхроне.
+   **Каталог-привязка:** при разборе подставляется каталог товаров клиента
+   (`products`) отдельным system-сообщением (`catalogMessage`, лимит 600) — модель
+   маппит названия строго на каталог и ставит `in_catalog` (false → «нет в
+   каталоге», подсвечивается). Каталог грузят вызывающие: `js/new-order.js`
+   (веб) и `tgbot` (бот); функция `catalogMessage` продублирована в тех же
+   трёх файлах — синхронно.
 
 4. **Таблица позиций (new-order) не перерисовывается при вводе.**
    Обработчики `input` обновляют только модель (`items`), ячейку «Сумма» и
@@ -80,9 +86,10 @@ GPT-4o-mini выделяет позиции → менеджер правит т
 
 5. **Подсветка уточнений.** Жёлтым (`tr.row-warn`: фон `#fff7d6`,
    рамка `#f0d775`) выделяются строки, для которых `needsReview()` истинно:
-   `qty == null`, `confidence === "low"`, `corrected === true` или
-   `confidence_score < 60`. Правка названия снимает все пометки (имя
-   подтверждено), правка количества снимает пометку самоисправления.
+   `qty == null`, `confidence === "low"`, `corrected === true`,
+   `in_catalog === false` (нет в каталоге) или `confidence_score < 60`. Правка
+   названия снимает все пометки (имя подтверждено, `in_catalog` → true), правка
+   количества снимает пометку самоисправления.
 
 6. **Нормализация — только на фронтенде**, между Whisper и GPT
    (`js/new-order.js` → `Normalizer.normalizeTranscript()`). На разбор и в
@@ -135,7 +142,10 @@ clients_accounts: id uuid, company_name, email, access_key (uniq, 16 симв.),
             (закрыта RLS; читает только service role в clientauth)
 telegram_links: chat_id (pk, bigint), user_id, company_name,
             role ('manager'|'customer'), client_name (кафе для customer),
-            pending_order jsonb, created_at   (только service role в tgbot)
+            file_format ('xlsx'|'csv'), tg_username, tg_first_name, tg_last_name,
+            pending_order jsonb, created_at
+            (бот — service role; владелец читает/правит свои строки: RLS
+             select/update по user_id = auth.uid() для вкладки «Telegram-клиенты»)
 ```
 
 У `orders`/`clients`/`products`/`order_logs` есть `user_id` (владелец строки).
@@ -145,9 +155,10 @@ RLS: пользователь видит свои строки, админ (`is_
 
 Элемент `items` / `standard_order`:
 `{ name, qty: number|null, unit, price: number|null, confidence: "high"|"medium"|"low",
-   confidence_score: 0..100, corrected: boolean, note }`
-Поля `confidence_score` / `corrected` опциональны: если модель их не вернула,
-`normalizeItem()` выводит их из `confidence` и `qty` (обратная совместимость).
+   confidence_score: 0..100, corrected: boolean, in_catalog: boolean, note }`
+Поля `confidence_score` / `corrected` / `in_catalog` опциональны: если модель их не
+вернула, `normalizeItem()` выводит их из `confidence` и `qty` (`in_catalog` по
+умолчанию true — обратная совместимость).
 
 Заказы связаны с клиентом по `client_name` (текст, без FK) — MVP-упрощение.
 

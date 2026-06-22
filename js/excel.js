@@ -26,7 +26,7 @@
     }
 
     const items = Array.isArray(order.items) ? order.items : [];
-    const rows = [["№", "Наименование", "Количество", "Ед.изм.", "Цена", "Сумма"]];
+    const rows = [["№", "Код", "Наименование", "Количество", "Ед.изм.", "Цена", "Сумма"]];
     let total = 0;
 
     items.forEach(function (it, i) {
@@ -36,6 +36,7 @@
       if (sum != null) total += sum;
       rows.push([
         i + 1,
+        it.article || "",
         it.name || "",
         qty == null ? "" : qty,
         it.unit || "",
@@ -44,12 +45,13 @@
       ]);
     });
 
-    rows.push(["", "Итого", "", "", "", total]);
+    rows.push(["", "", "Итого", "", "", "", total]);
 
     const ws = XLSX.utils.aoa_to_sheet(rows);
     ws["!cols"] = [
       { wch: 5 },  // №
-      { wch: 42 }, // Наименование
+      { wch: 10 }, // Код
+      { wch: 38 }, // Наименование
       { wch: 12 }, // Количество
       { wch: 9 },  // Ед.изм.
       { wch: 12 }, // Цена

@@ -21,6 +21,7 @@
     tabs: document.getElementById("view-tabs"),
     tabAnalytics: document.getElementById("tab-analytics"),
     clientsView: document.getElementById("clients-view"),
+    telegramView: document.getElementById("telegram-view"),
     analyticsView: document.getElementById("analytics-view")
   };
 
@@ -63,10 +64,11 @@
 
   function switchView(view, btn) {
     els.tabs.querySelectorAll("button").forEach(function (b) { b.classList.toggle("active", b === btn); });
-    const analytics = view === "analytics";
-    els.clientsView.classList.toggle("hidden", analytics);
-    els.analyticsView.classList.toggle("hidden", !analytics);
-    if (analytics && window.Analytics) window.Analytics.render(els.analyticsView, userId);
+    els.clientsView.classList.toggle("hidden", view !== "clients");
+    els.telegramView.classList.toggle("hidden", view !== "telegram");
+    els.analyticsView.classList.toggle("hidden", view !== "analytics");
+    if (view === "analytics" && window.Analytics) window.Analytics.render(els.analyticsView, userId);
+    if (view === "telegram") loadTelegram();
   }
 
   async function loadClients() {
@@ -320,6 +322,65 @@
       c.standard_order = cleaned;
       msg.innerHTML = '<div class="msg msg-success">Стандартный заказ сохранён.</div>';
     });
+
+    // Импорт из файла: парсим .xlsx/.csv и добавляем позиции в таблицу
+    // (не сохраняя — пользователь проверяет и жмёт «Сохранить»).
+    const imp = document.createElement("div");
+    imp.style.cssText = "margin:8px 0 4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap";
+    const impFile = document.createElement("input");
+    impFile.type = "file";
+    impFile.accept = ".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv";
+    impFile.style.maxWidth = "260px";
+    const impBtn = document.createElement("button");
+    impBtn.type = "button";
+    impBtn.className = "btn btn-outline btn-sm";
+    impBtn.textContent = "Загрузить из файла";
+    const impHint = document.createElement("span");
+    impHint.className = "client-sub";
+    impHint.textContent = "Колонки: Наименование, Количество, Ед.изм., Цена (цена необязательна)";
+    imp.appendChild(impFile);
+    imp.appendChild(impBtn);
+    imp.appendChild(impHint);
+    box.insertBefore(imp, wrap);
+
+    impBtn.addEventListener("click", async function () {
+      const file = impFile.files[0];
+      if (!file) { msg.innerHTML = '<div class="msg msg-warn">Выберите файл (.csv или .xlsx).</div>'; return; }
+      if (typeof XLSX === "undefined") {
+        msg.innerHTML = '<div class="msg msg-error">Библиотека для чтения файлов не загрузилась (проверьте доступ к CDN).</div>';
+        return;
+      }
+      impBtn.disabled = true;
+      try {
+        const rows = await readStdRows(file);
+        let added = 0, skipped = 0;
+        rows.forEach(function (r) {
+          const name = String(pickCol(r, ["Наименование", "Название", "Товар", "name"]) || "").trim();
+          if (!name) { skipped++; return; }
+          const it = normalizeStdItem({
+            name: name,
+            qty: parseNum(pickCol(r, ["Количество", "Кол-во", "Кол", "qty", "Quantity"])),
+            unit: String(pickCol(r, ["Ед.изм.", "Единица", "Единица измерения", "unit"]) || "").trim() || "шт",
+            price: parseNum(pickCol(r, ["Цена", "price"]))
+          });
+          std.push(it);
+          addRow(it);
+          added++;
+        });
+        if (added) {
+          msg.innerHTML = '<div class="msg msg-success">Добавлено позиций из файла: ' + added +
+            (skipped ? " (пропущено без названия: " + skipped + ")" : "") +
+            ". Проверьте таблицу и нажмите «Сохранить стандартный заказ».</div>";
+        } else {
+          msg.innerHTML = '<div class="msg msg-warn">Не найдено ни одной позиции. Проверьте, что в первой строке файла есть колонка «Наименование».</div>';
+        }
+        impFile.value = "";
+      } catch (e) {
+        msg.innerHTML = '<div class="msg msg-error">Ошибка чтения файла: ' + esc(e && e.message ? e.message : String(e)) + "</div>";
+      } finally {
+        impBtn.disabled = false;
+      }
+    });
   }
 
   function normalizeStdItem(it) {
@@ -330,6 +391,166 @@
       unit: it.unit ? String(it.unit) : "шт",
       price: it.price == null || it.price === "" || isNaN(Number(it.price)) ? null : Number(it.price)
     };
+  }
+
+  // ── Импорт стандартного заказа из файла (.xlsx/.csv через SheetJS) ──
+
+  async function readStdRows(file) {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(new Uint8Array(buf), { type: "array" });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    return ws ? XLSX.utils.sheet_to_json(ws, { defval: "" }) : [];
+  }
+
+  // Значение строки по одному из возможных заголовков (без учёта регистра/пробелов).
+  function pickCol(row, candidates) {
+    const keys = Object.keys(row);
+    for (let i = 0; i < candidates.length; i++) {
+      const want = candidates[i].trim().toLowerCase();
+      for (let j = 0; j < keys.length; j++) {
+        if (keys[j].trim().toLowerCase() === want) return row[keys[j]];
+      }
+    }
+    return undefined;
+  }
+
+  // «1 200,5» → 1200.5; пусто/мусор → null.
+  function parseNum(v) {
+    if (v == null || v === "") return null;
+    if (typeof v === "number") return isFinite(v) ? v : null;
+    const n = Number(String(v).replace(/\s/g, "").replace(",", "."));
+    return isFinite(n) ? n : null;
+  }
+
+  // ── Telegram-клиенты (привязка ТГ-чатов к клиентам базы) ──
+  // Бот сохраняет @username/имя чата; здесь менеджер привязывает чат кафе к
+  // карточке клиента из базы → telegram_links.client_name (каноничное имя).
+  // Тогда бот подставляет стандартный заказ и цены этого клиента.
+
+  async function loadTelegram() {
+    els.telegramView.innerHTML = '<div class="msg msg-info"><span class="spinner"></span> Загрузка Telegram-клиентов…</div>';
+    const { data, error } = await window.sb
+      .from("telegram_links")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false });
+    if (error) {
+      els.telegramView.innerHTML = '<div class="msg msg-error">Не удалось загрузить Telegram-клиентов: ' + esc(error.message) + "</div>";
+      return;
+    }
+    renderTelegram(data || []);
+  }
+
+  function renderTelegram(links) {
+    els.telegramView.innerHTML = "";
+
+    const hint = document.createElement("p");
+    hint.className = "client-sub";
+    hint.textContent = "Чаты, подключённые к боту. Привяжите чат кафе к клиенту из базы — " +
+      "тогда бот будет подставлять его стандартный заказ и цены.";
+    els.telegramView.appendChild(hint);
+
+    if (!links.length) {
+      const m = document.createElement("div");
+      m.className = "msg msg-info";
+      m.textContent = "Пока никто не подключился через Telegram. Отправьте кафе ссылку-приглашение из админ-панели, а менеджеру — ключ доступа.";
+      els.telegramView.appendChild(m);
+      return;
+    }
+    links.forEach(function (l) { els.telegramView.appendChild(tgCard(l)); });
+  }
+
+  function tgCard(l) {
+    const card = document.createElement("div");
+    card.className = "card";
+    const isCustomer = l.role === "customer";
+    const display = [l.tg_first_name, l.tg_last_name].filter(Boolean).join(" ") ||
+      (isCustomer ? "Кафе" : "Менеджер");
+    const uname = l.tg_username ? "@" + l.tg_username : "username не указан";
+    const roleLabel = isCustomer ? "Кафе" : "Менеджер";
+    const roleBadge = isCustomer ? "badge-processing" : "badge-new";
+    const unameHtml = l.tg_username
+      ? '<a href="https://t.me/' + esc(l.tg_username) + '" target="_blank" rel="noopener">' + esc(uname) + "</a>"
+      : esc(uname);
+
+    card.innerHTML =
+      '<div class="client-head">' +
+        "<div>" +
+          '<div class="client-name">' + esc(display) +
+            ' <span class="badge ' + roleBadge + '">' + roleLabel + "</span></div>" +
+          '<div class="client-sub">' + unameHtml + " · чат " + esc(String(l.chat_id)) + "</div>" +
+        "</div>" +
+      "</div>" +
+      '<div class="tg-bind" style="margin-top:12px"></div>';
+
+    const bind = card.querySelector(".tg-bind");
+
+    if (!isCustomer) {
+      // Менеджер-оператор определяет клиента по речи — фиксированная привязка не нужна.
+      const note = document.createElement("p");
+      note.className = "client-sub";
+      note.style.margin = "0";
+      note.textContent = "Менеджер-оператор поставщика. Клиента бот определяет по речи — привязка не требуется.";
+      bind.appendChild(note);
+      return card;
+    }
+
+    const label = document.createElement("label");
+    label.textContent = "Клиент в базе:";
+    label.style.marginRight = "8px";
+    const sel = tgClientSelect(l.client_name);
+    const msg = document.createElement("span");
+    msg.style.marginLeft = "10px";
+    msg.style.fontSize = "13px";
+
+    sel.addEventListener("change", async function () {
+      const val = sel.value;
+      sel.disabled = true;
+      msg.textContent = "Сохранение…";
+      const { error } = await window.sb
+        .from("telegram_links")
+        .update({ client_name: val || null })
+        .eq("chat_id", l.chat_id);
+      sel.disabled = false;
+      if (error) {
+        msg.innerHTML = '<span style="color:var(--danger)">Ошибка: ' + esc(error.message) + "</span>";
+        return;
+      }
+      l.client_name = val || null;
+      msg.innerHTML = '<span style="color:var(--ok)">Сохранено ✓</span>';
+    });
+
+    bind.appendChild(label);
+    bind.appendChild(sel);
+    bind.appendChild(msg);
+    return card;
+  }
+
+  // Выпадающий список клиентов базы; current — текущее client_name привязки.
+  function tgClientSelect(current) {
+    const sel = document.createElement("select");
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = "— не привязан —";
+    sel.appendChild(none);
+
+    let found = false;
+    clients.forEach(function (c) {
+      const o = document.createElement("option");
+      o.value = c.name;
+      o.textContent = c.name;
+      if (current && c.name === current) { o.selected = true; found = true; }
+      sel.appendChild(o);
+    });
+    // client_name задан, но такого клиента нет в базе — показываем как есть.
+    if (current && !found) {
+      const o = document.createElement("option");
+      o.value = current;
+      o.textContent = current + " (нет в базе)";
+      o.selected = true;
+      sel.appendChild(o);
+    }
+    return sel;
   }
 
   // ── Форма добавления/редактирования ──

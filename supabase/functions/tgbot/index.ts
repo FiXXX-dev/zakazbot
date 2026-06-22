@@ -13,7 +13,7 @@
 // изменения вносить во все три синхронно.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import * as XLSX from "https://esm.sh/xlsx@0.20.3";
+import * as XLSX from "https://cdn.sheetjs.com/xlsx-0.20.2/package/xlsx.mjs";
 import { normalizeTranscript } from "./normalize.ts";
 import { mergeStandardOrder, matchProduct, pickClient, MANAGER_NAMES } from "./order-logic.ts";
 
@@ -31,7 +31,7 @@ const WHISPER_PROMPT =
   "plastik vilka, qoshiq, idish, paket, qop, korobka. Самоисправления: yo'q, yo'q yo'q, emas.";
 
 const SYSTEM_PROMPT = `Ты — система распознавания заказов для поставщика HoReCa.
-Клиент диктует заказ на русском, узбекском или смешанном русско-узбекском языке.
+Клиент диктует заказ на русском, узбекском, смешанном русско-узбекском или другом языке.
 Текст уже прошёл предварительную нормализацию (числительные приведены к цифрам).
 Извлеки список товаров и верни ТОЛЬКО валидный JSON:
 {
@@ -48,6 +48,8 @@ const SYSTEM_PROMPT = `Ты — система распознавания зак
       "confidence": "high/medium/low",
       "confidence_score": 0-100,
       "corrected": true/false,
+      "in_catalog": true/false,
+      "article": "код товара если передан в каталоге",
       "note": "пометка если что-то неясно"
     }
   ]
@@ -63,7 +65,14 @@ const SYSTEM_PROMPT = `Ты — система распознавания зак
 - Не придумывай количество если не сказано — ставь qty=null и понижай confidence_score.
 - ПРАВИЛО МОДИФИКАЦИИ: Клиент может ссылаться на прошлый или стандартный заказ разными способами: «как обычно», «как вчера», «как всегда», «повтори прошлый», «помнишь прошлый заказ», «на прошлой неделе брали», «стандартный наш», «odatdagidek» и т.д. Во всех этих случаях ставь repeat_last_order=true — за основу берётся стандартный заказ клиента из базы.
 Если вместе с этим клиент указывает изменения — найди нужную позицию в стандартном заказе и ИЗМЕНИ её количество или убери её. НИКОГДА не добавляй дубль — если товар уже есть в списке (даже под похожим названием), только обновляй его, не создавай новую строку.
-Если клиент убирает товар («убери», «не нужно», «больше не берём») — верни эту позицию с qty=0.`;
+Если клиент убирает товар («убери», «не нужно», «больше не берём») — верни эту позицию с qty=0.
+- КАТАЛОГ ТОВАРОВ. Если отдельным системным сообщением передан КАТАЛОГ доступных товаров — сопоставляй каждую позицию строго с ним:
+  • поле "name" пиши ТОЧНО как в каталоге (буква в букву), даже если клиент сказал на другом языке, сократил или ошибся; один товар на разных языках («стакан», «stakan», «cup», «杯子») → одно и то же каталожное название;
+  • уверенно сопоставил — "in_catalog": true; в каталоге нет подходящего товара — НЕ выдумывай каталожное имя и НЕ выбрасывай позицию: оставь название как сказал клиент, "in_catalog": false, "confidence":"low", note "нет в каталоге";
+  • соответствие неоднозначно (несколько похожих) — выбери наиболее вероятный, "in_catalog": true, "confidence":"low";
+  • единицу для сопоставленного товара бери из каталога, если она там указана;
+  • если в каталоге у товара есть поле "article" — верни его точно в поле "article" позиции.
+Если каталог НЕ передан — ставь "in_catalog": true для всех распознанных позиций и работай как обычно.`;
 
 function svc() {
   return createClient(URL, SERVICE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
@@ -105,8 +114,33 @@ async function transcribe(fileId: string): Promise<string> {
   return d?.text ?? "";
 }
 
+const CATALOG_LIMIT = 600;
+// Каталог товаров клиента → отдельное system-сообщение для привязки названий.
+// Дублирует логику из js/openai.js / openaiproxy (держать в синхроне).
 // deno-lint-ignore no-explicit-any
-async function parseOrder(text: string): Promise<any> {
+function catalogMessage(catalog: any): string | null {
+  if (!Array.isArray(catalog) || !catalog.length) return null;
+  const list: Array<Record<string, string>> = [];
+  for (let i = 0; i < catalog.length && list.length < CATALOG_LIMIT; i++) {
+    const c = catalog[i];
+    const name = c && c.name ? String(c.name).trim() : "";
+    if (!name) continue;
+    const entry: Record<string, string> = { name };
+    if (c && c.unit) entry.unit = String(c.unit);
+    if (c && c.article) entry.article = String(c.article);
+    list.push(entry);
+  }
+  if (!list.length) return null;
+  return 'КАТАЛОГ ТОВАРОВ (сопоставляй строго с этими названиями; "name" в ответе — точно как здесь; если у товара есть "article" — верни его в "article" позиции):\n' + JSON.stringify(list);
+}
+
+// deno-lint-ignore no-explicit-any
+async function parseOrder(text: string, catalog?: any): Promise<any> {
+  // deno-lint-ignore no-explicit-any
+  const messages: any[] = [{ role: "system", content: SYSTEM_PROMPT }];
+  const catMsg = catalogMessage(catalog);
+  if (catMsg) messages.push({ role: "system", content: catMsg });
+  messages.push({ role: "user", content: text });
   const r = await fetch(`${OPENAI_API}/chat/completions`, {
     method: "POST",
     headers: { Authorization: `Bearer ${OPENAI_KEY}`, "Content-Type": "application/json" },
@@ -114,7 +148,7 @@ async function parseOrder(text: string): Promise<any> {
       model: "gpt-4o-mini",
       temperature: 0,
       response_format: { type: "json_object" },
-      messages: [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: text }],
+      messages,
     }),
   });
   const d = await r.json();
@@ -135,6 +169,8 @@ function normItems(items: any): any[] {
       confidence: it && (it.confidence === "low" || it.confidence === "medium") ? it.confidence : "high",
       confidence_score: typeof (it && it.confidence_score) === "number" ? it.confidence_score : null,
       corrected: !!(it && it.corrected),
+      in_catalog: it && it.in_catalog === false ? false : true,
+      article: it && it.article ? String(it.article) : null,
       note: it && it.note ? String(it.note) : "",
     };
   }).filter((x) => x.name.trim() !== "");
@@ -150,7 +186,10 @@ function formatOrder(parsed: any, items: any[], norm: any): string {
   lines.push("");
   items.forEach((it, i) => {
     const q = it.qty == null ? "?" : it.qty;
-    const warn = it.qty == null || it.corrected || it.confidence === "low" ? "  ⚠️" : "";
+    const flags: string[] = [];
+    if (it.qty == null || it.corrected || it.confidence === "low") flags.push("⚠️");
+    if (it.in_catalog === false) flags.push("❗нет в каталоге");
+    const warn = flags.length ? "  " + flags.join(" ") : "";
     lines.push(`${i + 1}. ${it.name} — ${q} ${it.unit}${warn}`);
   });
   if (!items.length) lines.push("позиции не распознаны");
@@ -163,6 +202,36 @@ function formatOrder(parsed: any, items: any[], norm: any): string {
 async function getLink(chatId: number): Promise<any> {
   const { data } = await svc().from("telegram_links").select("*").eq("chat_id", chatId).maybeSingle();
   return data;
+}
+
+// Telegram-личность отправителя (msg.from / cb.from) для привязки в веб-кабинете.
+// deno-lint-ignore no-explicit-any
+function identityOf(from: any) {
+  return {
+    tg_username:   from && from.username   ? String(from.username)   : null,
+    tg_first_name: from && from.first_name ? String(from.first_name) : null,
+    tg_last_name:  from && from.last_name  ? String(from.last_name)  : null,
+  };
+}
+
+// Best-effort: сохраняем @username / имя чата. Не критично — не должно ломать
+// поток, если колонок ещё нет (миграция schema.sql не выполнена).
+// deno-lint-ignore no-explicit-any
+async function saveIdentity(chatId: number, from: any) {
+  if (!from) return;
+  try { await svc().from("telegram_links").update(identityOf(from)).eq("chat_id", chatId); }
+  catch (_e) { /* колонок может не быть до миграции */ }
+}
+
+// Обновляет личность только при изменении — чтобы не писать на каждое сообщение.
+// deno-lint-ignore no-explicit-any
+async function touchIdentity(chatId: number, link: any, from: any) {
+  if (!from) return;
+  const id = identityOf(from);
+  if (link.tg_username === id.tg_username &&
+      link.tg_first_name === id.tg_first_name &&
+      link.tg_last_name === id.tg_last_name) return;
+  await saveIdentity(chatId, from);
 }
 
 // Отправка файла документом в Telegram (multipart).
@@ -179,16 +248,16 @@ async function tgDocument(chatId: number, filename: string, blob: Blob, caption:
 // deno-lint-ignore no-explicit-any
 function buildXlsx(items: any[]): Uint8Array {
   // deno-lint-ignore no-explicit-any
-  const rows: any[][] = [["№", "Наименование", "Количество", "Ед.изм.", "Цена", "Сумма"]];
+  const rows: any[][] = [["№", "Код", "Наименование", "Количество", "Ед.изм.", "Цена", "Сумма"]];
   let total = 0;
   items.forEach((it, i) => {
     const sum = it.qty != null && it.price != null ? it.qty * it.price : "";
     if (typeof sum === "number") total += sum;
-    rows.push([i + 1, it.name || "", it.qty == null ? "" : it.qty, it.unit || "", it.price == null ? "" : it.price, sum]);
+    rows.push([i + 1, it.article || "", it.name || "", it.qty == null ? "" : it.qty, it.unit || "", it.price == null ? "" : it.price, sum]);
   });
-  rows.push(["", "Итого", "", "", "", total]);
+  rows.push(["", "", "Итого", "", "", "", total]);
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws["!cols"] = [{ wch: 5 }, { wch: 42 }, { wch: 12 }, { wch: 9 }, { wch: 12 }, { wch: 14 }];
+  ws["!cols"] = [{ wch: 5 }, { wch: 10 }, { wch: 38 }, { wch: 12 }, { wch: 9 }, { wch: 12 }, { wch: 14 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Заказ");
   return new Uint8Array(XLSX.write(wb, { bookType: "xlsx", type: "array" }));
@@ -214,15 +283,15 @@ function csvCell(v: unknown): string {
 
 // deno-lint-ignore no-explicit-any
 function buildCsv(items: any[]): string {
-  const rows: string[][] = [["№", "Наименование", "Количество", "Ед.изм.", "Цена", "Сумма"]];
+  const rows: string[][] = [["№", "Код", "Наименование", "Количество", "Ед.изм.", "Цена", "Сумма"]];
   let total = 0;
   items.forEach((it, i) => {
     const sum = it.qty != null && it.price != null ? it.qty * it.price : "";
     if (typeof sum === "number") total += sum;
-    rows.push([String(i + 1), it.name || "", it.qty == null ? "" : String(it.qty),
+    rows.push([String(i + 1), it.article || "", it.name || "", it.qty == null ? "" : String(it.qty),
       it.unit || "", it.price == null ? "" : String(it.price), sum === "" ? "" : String(sum)]);
   });
-  rows.push(["", "Итого", "", "", "", String(total)]);
+  rows.push(["", "", "Итого", "", "", "", String(total)]);
   return rows.map((r) => r.map(csvCell).join(";")).join("\r\n");
 }
 
@@ -259,9 +328,18 @@ async function processOrderText(chatId: number, link: any, rawText: string) {
     return;
   }
   const norm = normalizeTranscript(rawText);
-  const parsed = await parseOrder(norm.text);
-  let items = normItems(parsed.items);
   const supplier = link.user_id;
+  // Каталог товаров поставщика — для привязки названий моделью и подстановки цен.
+  const { data: products } = await svc().from("products").select("name, unit, price, article").eq("user_id", supplier);
+  // deno-lint-ignore no-explicit-any
+  const parsed = await parseOrder(norm.text, (products ?? []).map((p: any) => {
+    // deno-lint-ignore no-explicit-any
+    const e: any = { name: p.name };
+    if (p.unit) e.unit = p.unit;
+    if (p.article) e.article = p.article;
+    return e;
+  }));
+  let items = normItems(parsed.items);
 
   let chosenName = parsed.client_name ? String(parsed.client_name) : "";
   // deno-lint-ignore no-explicit-any
@@ -312,11 +390,10 @@ async function processOrderText(chatId: number, link: any, rawText: string) {
     note = "↩️ Просит «как обычно», но клиент не найден в базе — проверьте имя.";
   }
 
-  // 3. Цены из каталога для позиций без цены.
-  const { data: products } = await svc().from("products").select("name, price").eq("user_id", supplier);
+  // 3. Цены из каталога для позиций без цены (каталог уже загружен выше).
   if (products && products.length) {
     items.forEach((it) => {
-      if (it.price == null) { const p = matchProduct(it.name, products); if (p && p.price != null) it.price = Number(p.price); }
+      if (it.price == null) { const p = matchProduct(it.name, products, it.article ?? undefined); if (p && p.price != null) it.price = Number(p.price); }
     });
   }
 
@@ -505,6 +582,9 @@ async function handle(update: any) {
   const text = (msg.text || "").trim();
   const link = await getLink(chatId);
 
+  // Поддерживаем @username / имя чата в актуальном виде (для привязки в вебе).
+  if (link && link.user_id) await touchIdentity(chatId, link, msg.from);
+
   // ── Ссылка-приглашение клиента: /start <customer_code> ──
   const startPayload = text.startsWith("/start ") ? text.slice(7).trim() : "";
   if (startPayload) {
@@ -515,6 +595,7 @@ async function handle(update: any) {
         chat_id: chatId, user_id: acct.data.user_id, company_name: acct.data.company_name,
         role: "customer", client_name: null, pending_order: null,
       }, { onConflict: "chat_id" });
+      await saveIdentity(chatId, msg.from);
       await tg("sendMessage", { chat_id: chatId,
         text: `Вы подключаетесь к поставщику «${acct.data.company_name}».\nНапишите название вашего заведения (например: Кафе Лагман).`,
         reply_markup: { remove_keyboard: true } });
@@ -547,6 +628,7 @@ async function handle(update: any) {
       chat_id: chatId, user_id: acct.data.user_id, company_name: acct.data.company_name,
       role: "manager", client_name: null, pending_order: null,
     }, { onConflict: "chat_id" });
+    await saveIdentity(chatId, msg.from);
     await setCommands();
     await tg("sendMessage", { chat_id: chatId, text:
       `Готово ✅ Чат привязан к «${acct.data.company_name}».\n\nПрисылайте голосовое сообщение или текст заказа — я разберу его в позиции.`,
