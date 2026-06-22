@@ -129,6 +129,11 @@
     if (!error && data) productsCache = data;
   }
 
+  // Каталог { name, unit } для привязки названий моделью при разборе заказа.
+  function catalogForPrompt() {
+    return (productsCache || []).map(function (p) { return { name: p.name, unit: p.unit }; });
+  }
+
   // Подставляет цену из каталога для позиций без цены — только при однозначном
   // совпадении названия (OrderMerge.matchProduct). Единицу не трогаем (могла
   // быть распознана из речи). Мутирует и возвращает тот же массив.
@@ -340,7 +345,7 @@
       };
 
       setBusy("Разбираю заказ (GPT-4o-mini)…");
-      const parsed = await window.AI.parseOrder(norm.text);
+      const parsed = await window.AI.parseOrder(norm.text, catalogForPrompt());
       await applyParsed(parsed || {});
 
       if (!items.length) {
@@ -490,6 +495,8 @@
       : deriveScore(confidence, qty, corrected);
     if (qty == null) score = Math.min(score, 50); // нет количества — позиция неполная
     if (corrected) score = Math.min(score, 70);   // было самоисправление — перепроверить
+    const inCatalog = it.in_catalog === false ? false : true;
+    if (!inCatalog) score = Math.min(score, 50);  // нет в каталоге — перепроверить
     return {
       name: it.name ? String(it.name) : "",
       qty: qty,
@@ -498,6 +505,7 @@
       confidence: confidence,
       confidence_score: Math.round(score),
       corrected: corrected,
+      in_catalog: inCatalog,
       note: it.note ? String(it.note) : ""
     };
   }
@@ -524,6 +532,7 @@
     return item.qty == null ||
       item.confidence === "low" ||
       item.corrected === true ||
+      item.in_catalog === false ||
       (typeof item.confidence_score === "number" && item.confidence_score < REVIEW_THRESHOLD);
   }
 
@@ -531,6 +540,7 @@
   function reviewReasons(item) {
     const r = [];
     if (item.qty == null) r.push("нет количества");
+    if (item.in_catalog === false) r.push("нет в каталоге");
     if (item.corrected === true) r.push("было самоисправление");
     if (item.confidence === "low" ||
         (typeof item.confidence_score === "number" && item.confidence_score < REVIEW_THRESHOLD)) {
@@ -608,6 +618,7 @@
       item.confidence = "high";
       item.confidence_score = 100;
       item.corrected = false;
+      item.in_catalog = true;
       item.note = "";
       noteDiv.textContent = "";
       refreshRowState();

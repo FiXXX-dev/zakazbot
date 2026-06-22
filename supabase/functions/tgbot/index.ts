@@ -31,7 +31,7 @@ const WHISPER_PROMPT =
   "plastik vilka, qoshiq, idish, paket, qop, korobka. Самоисправления: yo'q, yo'q yo'q, emas.";
 
 const SYSTEM_PROMPT = `Ты — система распознавания заказов для поставщика HoReCa.
-Клиент диктует заказ на русском, узбекском или смешанном русско-узбекском языке.
+Клиент диктует заказ на русском, узбекском, смешанном русско-узбекском или другом языке.
 Текст уже прошёл предварительную нормализацию (числительные приведены к цифрам).
 Извлеки список товаров и верни ТОЛЬКО валидный JSON:
 {
@@ -48,6 +48,7 @@ const SYSTEM_PROMPT = `Ты — система распознавания зак
       "confidence": "high/medium/low",
       "confidence_score": 0-100,
       "corrected": true/false,
+      "in_catalog": true/false,
       "note": "пометка если что-то неясно"
     }
   ]
@@ -63,7 +64,13 @@ const SYSTEM_PROMPT = `Ты — система распознавания зак
 - Не придумывай количество если не сказано — ставь qty=null и понижай confidence_score.
 - ПРАВИЛО МОДИФИКАЦИИ: Клиент может ссылаться на прошлый или стандартный заказ разными способами: «как обычно», «как вчера», «как всегда», «повтори прошлый», «помнишь прошлый заказ», «на прошлой неделе брали», «стандартный наш», «odatdagidek» и т.д. Во всех этих случаях ставь repeat_last_order=true — за основу берётся стандартный заказ клиента из базы.
 Если вместе с этим клиент указывает изменения — найди нужную позицию в стандартном заказе и ИЗМЕНИ её количество или убери её. НИКОГДА не добавляй дубль — если товар уже есть в списке (даже под похожим названием), только обновляй его, не создавай новую строку.
-Если клиент убирает товар («убери», «не нужно», «больше не берём») — верни эту позицию с qty=0.`;
+Если клиент убирает товар («убери», «не нужно», «больше не берём») — верни эту позицию с qty=0.
+- КАТАЛОГ ТОВАРОВ. Если отдельным системным сообщением передан КАТАЛОГ доступных товаров — сопоставляй каждую позицию строго с ним:
+  • поле "name" пиши ТОЧНО как в каталоге (буква в букву), даже если клиент сказал на другом языке, сократил или ошибся; один товар на разных языках («стакан», «stakan», «cup», «杯子») → одно и то же каталожное название;
+  • уверенно сопоставил — "in_catalog": true; в каталоге нет подходящего товара — НЕ выдумывай каталожное имя и НЕ выбрасывай позицию: оставь название как сказал клиент, "in_catalog": false, "confidence":"low", note "нет в каталоге";
+  • соответствие неоднозначно (несколько похожих) — выбери наиболее вероятный, "in_catalog": true, "confidence":"low";
+  • единицу для сопоставленного товара бери из каталога, если она там указана.
+Если каталог НЕ передан — ставь "in_catalog": true для всех распознанных позиций и работай как обычно.`;
 
 function svc() {
   return createClient(URL, SERVICE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
@@ -105,8 +112,30 @@ async function transcribe(fileId: string): Promise<string> {
   return d?.text ?? "";
 }
 
+const CATALOG_LIMIT = 600;
+// Каталог товаров клиента → отдельное system-сообщение для привязки названий.
+// Дублирует логику из js/openai.js / openaiproxy (держать в синхроне).
 // deno-lint-ignore no-explicit-any
-async function parseOrder(text: string): Promise<any> {
+function catalogMessage(catalog: any): string | null {
+  if (!Array.isArray(catalog) || !catalog.length) return null;
+  const list: Array<Record<string, string>> = [];
+  for (let i = 0; i < catalog.length && list.length < CATALOG_LIMIT; i++) {
+    const c = catalog[i];
+    const name = c && c.name ? String(c.name).trim() : "";
+    if (!name) continue;
+    list.push(c && c.unit ? { name, unit: String(c.unit) } : { name });
+  }
+  if (!list.length) return null;
+  return 'КАТАЛОГ ТОВАРОВ (сопоставляй строго с этими названиями; "name" в ответе — точно как здесь, если товар есть в каталоге):\n' + JSON.stringify(list);
+}
+
+// deno-lint-ignore no-explicit-any
+async function parseOrder(text: string, catalog?: any): Promise<any> {
+  // deno-lint-ignore no-explicit-any
+  const messages: any[] = [{ role: "system", content: SYSTEM_PROMPT }];
+  const catMsg = catalogMessage(catalog);
+  if (catMsg) messages.push({ role: "system", content: catMsg });
+  messages.push({ role: "user", content: text });
   const r = await fetch(`${OPENAI_API}/chat/completions`, {
     method: "POST",
     headers: { Authorization: `Bearer ${OPENAI_KEY}`, "Content-Type": "application/json" },
@@ -114,7 +143,7 @@ async function parseOrder(text: string): Promise<any> {
       model: "gpt-4o-mini",
       temperature: 0,
       response_format: { type: "json_object" },
-      messages: [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: text }],
+      messages,
     }),
   });
   const d = await r.json();
@@ -135,6 +164,7 @@ function normItems(items: any): any[] {
       confidence: it && (it.confidence === "low" || it.confidence === "medium") ? it.confidence : "high",
       confidence_score: typeof (it && it.confidence_score) === "number" ? it.confidence_score : null,
       corrected: !!(it && it.corrected),
+      in_catalog: it && it.in_catalog === false ? false : true,
       note: it && it.note ? String(it.note) : "",
     };
   }).filter((x) => x.name.trim() !== "");
@@ -150,7 +180,10 @@ function formatOrder(parsed: any, items: any[], norm: any): string {
   lines.push("");
   items.forEach((it, i) => {
     const q = it.qty == null ? "?" : it.qty;
-    const warn = it.qty == null || it.corrected || it.confidence === "low" ? "  ⚠️" : "";
+    const flags: string[] = [];
+    if (it.qty == null || it.corrected || it.confidence === "low") flags.push("⚠️");
+    if (it.in_catalog === false) flags.push("❗нет в каталоге");
+    const warn = flags.length ? "  " + flags.join(" ") : "";
     lines.push(`${i + 1}. ${it.name} — ${q} ${it.unit}${warn}`);
   });
   if (!items.length) lines.push("позиции не распознаны");
@@ -289,9 +322,12 @@ async function processOrderText(chatId: number, link: any, rawText: string) {
     return;
   }
   const norm = normalizeTranscript(rawText);
-  const parsed = await parseOrder(norm.text);
-  let items = normItems(parsed.items);
   const supplier = link.user_id;
+  // Каталог товаров поставщика — для привязки названий моделью и подстановки цен.
+  const { data: products } = await svc().from("products").select("name, unit, price").eq("user_id", supplier);
+  // deno-lint-ignore no-explicit-any
+  const parsed = await parseOrder(norm.text, (products ?? []).map((p: any) => ({ name: p.name, unit: p.unit })));
+  let items = normItems(parsed.items);
 
   let chosenName = parsed.client_name ? String(parsed.client_name) : "";
   // deno-lint-ignore no-explicit-any
@@ -342,8 +378,7 @@ async function processOrderText(chatId: number, link: any, rawText: string) {
     note = "↩️ Просит «как обычно», но клиент не найден в базе — проверьте имя.";
   }
 
-  // 3. Цены из каталога для позиций без цены.
-  const { data: products } = await svc().from("products").select("name, price").eq("user_id", supplier);
+  // 3. Цены из каталога для позиций без цены (каталог уже загружен выше).
   if (products && products.length) {
     items.forEach((it) => {
       if (it.price == null) { const p = matchProduct(it.name, products); if (p && p.price != null) it.price = Number(p.price); }

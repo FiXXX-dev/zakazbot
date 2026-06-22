@@ -71,6 +71,12 @@ GPT-4o-mini выделяет позиции → менеджер правит т
    Любые изменения промпта вносить во все три файла синхронно.
    Аналогично нормализация: `js/dictionary.js`+`js/normalize.js` (фронт) и
    `supabase/functions/tgbot/normalize.ts` (порт для бота) — держать в синхроне.
+   **Каталог-привязка:** при разборе подставляется каталог товаров клиента
+   (`products`) отдельным system-сообщением (`catalogMessage`, лимит 600) — модель
+   маппит названия строго на каталог и ставит `in_catalog` (false → «нет в
+   каталоге», подсвечивается). Каталог грузят вызывающие: `js/new-order.js`
+   (веб) и `tgbot` (бот); функция `catalogMessage` продублирована в тех же
+   трёх файлах — синхронно.
 
 4. **Таблица позиций (new-order) не перерисовывается при вводе.**
    Обработчики `input` обновляют только модель (`items`), ячейку «Сумма» и
@@ -80,9 +86,10 @@ GPT-4o-mini выделяет позиции → менеджер правит т
 
 5. **Подсветка уточнений.** Жёлтым (`tr.row-warn`: фон `#fff7d6`,
    рамка `#f0d775`) выделяются строки, для которых `needsReview()` истинно:
-   `qty == null`, `confidence === "low"`, `corrected === true` или
-   `confidence_score < 60`. Правка названия снимает все пометки (имя
-   подтверждено), правка количества снимает пометку самоисправления.
+   `qty == null`, `confidence === "low"`, `corrected === true`,
+   `in_catalog === false` (нет в каталоге) или `confidence_score < 60`. Правка
+   названия снимает все пометки (имя подтверждено, `in_catalog` → true), правка
+   количества снимает пометку самоисправления.
 
 6. **Нормализация — только на фронтенде**, между Whisper и GPT
    (`js/new-order.js` → `Normalizer.normalizeTranscript()`). На разбор и в
@@ -148,9 +155,10 @@ RLS: пользователь видит свои строки, админ (`is_
 
 Элемент `items` / `standard_order`:
 `{ name, qty: number|null, unit, price: number|null, confidence: "high"|"medium"|"low",
-   confidence_score: 0..100, corrected: boolean, note }`
-Поля `confidence_score` / `corrected` опциональны: если модель их не вернула,
-`normalizeItem()` выводит их из `confidence` и `qty` (обратная совместимость).
+   confidence_score: 0..100, corrected: boolean, in_catalog: boolean, note }`
+Поля `confidence_score` / `corrected` / `in_catalog` опциональны: если модель их не
+вернула, `normalizeItem()` выводит их из `confidence` и `qty` (`in_catalog` по
+умолчанию true — обратная совместимость).
 
 Заказы связаны с клиентом по `client_name` (текст, без FK) — MVP-упрощение.
 
