@@ -81,8 +81,13 @@ export function mergeStandardOrder(base: any[], spoken: any[]): { items: any[]; 
   return { items: items.concat(added), changes };
 }
 
-// Однозначное совпадение товара в каталоге (иначе null — чужую цену не ставим).
-export function matchProduct(name: any, products: any[]): any {
+// Однозначное совпадение товара в каталоге. Если передан article — ищем по нему
+// точно; иначе — по названию (namesMatch). Иначе null — чужую цену не ставим.
+export function matchProduct(name: any, products: any[], article?: string): any {
+  if (article) {
+    const byArt = (products || []).filter((p) => p && p.article && String(p.article) === String(article));
+    if (byArt.length === 1) return byArt[0];
+  }
   const hits = (products || []).filter((p) => p && p.name && namesMatch(name, p.name));
   return hits.length === 1 ? hits[0] : null;
 }

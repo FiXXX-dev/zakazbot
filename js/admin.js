@@ -85,6 +85,7 @@
       (q ? " · показано: " + list.length : "") + "</div>";
     const rows = list.map(function (p) {
       return "<tr>" +
+        "<td>" + esc(p.article || "") + "</td>" +
         "<td>" + esc(p.name) + "</td>" +
         "<td>" + esc(p.unit || "") + "</td>" +
         "<td>" + (p.price == null ? "" : esc(fmtPrice(p.price))) + "</td>" +
@@ -93,7 +94,7 @@
     }).join("");
     els.pList.innerHTML = head +
       '<div class="table-wrap"><table class="items-table"><thead><tr>' +
-        "<th>Наименование</th><th>Ед.изм.</th><th>Цена</th><th></th>" +
+        "<th>Код</th><th>Наименование</th><th>Ед.изм.</th><th>Цена</th><th></th>" +
       "</tr></thead><tbody>" + rows + "</tbody></table></div>";
 
     els.pList.querySelectorAll(".del-prod").forEach(function (btn) {
@@ -125,13 +126,49 @@
     return isFinite(v) ? v.toLocaleString("ru-RU") : String(n);
   }
 
-  // Файл (.xlsx/.csv) → массив объектов-строк, ключи — заголовки первой строки.
-  async function readRows(file) {
+  // Читает лист из файла и определяет формат (1С или стандартный).
+  // Возвращает { is1C: bool, rows: [...] } где rows — нормализованные объекты.
+  async function readAndDetect(file) {
     const buf = await file.arrayBuffer();
     const wb = XLSX.read(new Uint8Array(buf), { type: "array" });
     const ws = wb.Sheets[wb.SheetNames[0]];
-    if (!ws) return [];
-    return XLSX.utils.sheet_to_json(ws, { defval: "" });
+    if (!ws) return { is1C: false, rows: [] };
+
+    // Сырые строки как массив массивов — нужны для поиска шапки 1С.
+    const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+
+    // Ищем строку с ячейкой «Код» среди первых 20 строк (1С-формат).
+    for (let r = 0; r < Math.min(raw.length, 20); r++) {
+      const row = raw[r];
+      const headers = row.map(function (v) { return String(v || "").trim().toLowerCase(); });
+      const kodCol = headers.indexOf("код");
+      if (kodCol < 0) continue;
+
+      const naimCol = headers.findIndex(function (h) { return h === "наименование" || h.startsWith("наим"); });
+      // «Продажная цена» — столбец с единицей; следующий за ним — цена.
+      const priceUnitCol = headers.findIndex(function (h) { return h.includes("продажн"); });
+      if (naimCol < 0 || priceUnitCol < 0) continue;
+
+      const priceCol = priceUnitCol + 1;
+      const rows1C = [];
+      for (let dr = r + 1; dr < raw.length; dr++) {
+        const drow = raw[dr];
+        const name = str(drow[naimCol]);
+        if (!name) continue;
+        // Пропускаем подзаголовки (название совпадает с заголовком колонки).
+        const nameLow = name.trim().toLowerCase();
+        if (nameLow === "наименование" || nameLow === "наим.") continue;
+        const article = str(drow[kodCol]) || null;
+        const unit = str(drow[priceUnitCol]) || null;
+        const price = parsePrice(drow[priceCol]);
+        rows1C.push({ name: name, article: article, unit: unit, price: price });
+      }
+      return { is1C: true, rows: rows1C };
+    }
+
+    // Стандартный формат — SheetJS определяет заголовки из первой строки.
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+    return { is1C: false, rows: rows };
   }
 
   // Значение строки по одному из возможных заголовков (без учёта регистра/пробелов).
@@ -180,31 +217,46 @@
     els.pBtn.disabled = true;
     show(els.pMsg, "info", '<span class="spinner"></span> Читаю файл…');
     try {
-      const raw = await readRows(file);
-      if (!raw.length) { show(els.pMsg, "warn", "В файле нет строк."); return; }
+      const detected = await readAndDetect(file);
+      if (!detected.rows.length) { show(els.pMsg, "warn", "В файле нет строк."); return; }
 
       let skipped = 0;
       const rows = [];
-      raw.forEach(function (r) {
-        const name = str(pick(r, ["Наименование", "Название", "Товар", "name"]));
-        if (!name) { skipped++; return; }
-        rows.push({
-          name: name,
-          unit: str(pick(r, ["Единица", "Ед.изм.", "Единица измерения", "unit"])) || null,
-          price: parsePrice(pick(r, ["Цена", "price"])),
-          user_id: userId
+
+      if (detected.is1C) {
+        detected.rows.forEach(function (r) {
+          rows.push({
+            name: r.name,
+            article: r.article,
+            unit: r.unit,
+            price: r.price,
+            user_id: userId
+          });
         });
-      });
+      } else {
+        detected.rows.forEach(function (r) {
+          const name = str(pick(r, ["Наименование", "Название", "Товар", "name"]));
+          if (!name) { skipped++; return; }
+          rows.push({
+            name: name,
+            article: str(pick(r, ["Код", "Артикул", "article"])) || null,
+            unit: str(pick(r, ["Единица", "Ед.изм.", "Единица измерения", "unit"])) || null,
+            price: parsePrice(pick(r, ["Цена", "price"])),
+            user_id: userId
+          });
+        });
+      }
 
       if (!rows.length) {
         show(els.pMsg, "error",
-          "Не найдено ни одного товара. Проверьте, что в первой строке есть колонка «Наименование».");
+          "Не найдено ни одного товара. Проверьте, что есть колонка «Наименование» (или «Код» для формата 1С).");
         return;
       }
 
-      show(els.pMsg, "info", '<span class="spinner"></span> Загружаю товаров: ' + rows.length + "…");
+      const fmtLabel = detected.is1C ? " (формат 1С)" : "";
+      show(els.pMsg, "info", '<span class="spinner"></span> Загружаю товаров: ' + rows.length + fmtLabel + "…");
       const added = await insertChunked("products", rows);
-      show(els.pMsg, "success", "Добавлено товаров: " + added +
+      show(els.pMsg, "success", "Добавлено товаров: " + added + fmtLabel +
         (skipped ? ". Пропущено строк без названия: " + skipped : "") + ".");
       els.pFile.value = "";
       loadProducts();

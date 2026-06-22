@@ -119,10 +119,16 @@
     return { items: items.concat(added), changes: changes };
   }
 
-  // Ищет товар в каталоге (products) по названию позиции. Возвращает запись
-  // ТОЛЬКО при однозначном совпадении (ровно один товар) — иначе null, чтобы
-  // не подставить чужую цену. Совпадение — то же консервативное namesMatch.
-  function matchProduct(name, products) {
+  // Ищет товар в каталоге (products) по названию позиции. Если передан article
+  // (код из 1С) — сначала ищем по нему точно; иначе — по названию (namesMatch).
+  // Возвращает запись ТОЛЬКО при однозначном совпадении — иначе null.
+  function matchProduct(name, products, article) {
+    if (article) {
+      const byArt = (products || []).filter(function (p) {
+        return p && p.article && String(p.article) === String(article);
+      });
+      if (byArt.length === 1) return byArt[0];
+    }
     const hits = (products || []).filter(function (p) {
       return p && p.name && namesMatch(name, p.name);
     });

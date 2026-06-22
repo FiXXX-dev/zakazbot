@@ -49,6 +49,7 @@ const SYSTEM_PROMPT = `Ты — система распознавания зак
       "confidence_score": 0-100,
       "corrected": true/false,
       "in_catalog": true/false,
+      "article": "код товара если передан в каталоге",
       "note": "пометка если что-то неясно"
     }
   ]
@@ -69,7 +70,8 @@ const SYSTEM_PROMPT = `Ты — система распознавания зак
   • поле "name" пиши ТОЧНО как в каталоге (буква в букву), даже если клиент сказал на другом языке, сократил или ошибся; один товар на разных языках («стакан», «stakan», «cup», «杯子») → одно и то же каталожное название;
   • уверенно сопоставил — "in_catalog": true; в каталоге нет подходящего товара — НЕ выдумывай каталожное имя и НЕ выбрасывай позицию: оставь название как сказал клиент, "in_catalog": false, "confidence":"low", note "нет в каталоге";
   • соответствие неоднозначно (несколько похожих) — выбери наиболее вероятный, "in_catalog": true, "confidence":"low";
-  • единицу для сопоставленного товара бери из каталога, если она там указана.
+  • единицу для сопоставленного товара бери из каталога, если она там указана;
+  • если в каталоге у товара есть поле "article" — верни его точно в поле "article" позиции.
 Если каталог НЕ передан — ставь "in_catalog": true для всех распознанных позиций и работай как обычно.`;
 
 function svc() {
@@ -123,10 +125,13 @@ function catalogMessage(catalog: any): string | null {
     const c = catalog[i];
     const name = c && c.name ? String(c.name).trim() : "";
     if (!name) continue;
-    list.push(c && c.unit ? { name, unit: String(c.unit) } : { name });
+    const entry: Record<string, string> = { name };
+    if (c && c.unit) entry.unit = String(c.unit);
+    if (c && c.article) entry.article = String(c.article);
+    list.push(entry);
   }
   if (!list.length) return null;
-  return 'КАТАЛОГ ТОВАРОВ (сопоставляй строго с этими названиями; "name" в ответе — точно как здесь, если товар есть в каталоге):\n' + JSON.stringify(list);
+  return 'КАТАЛОГ ТОВАРОВ (сопоставляй строго с этими названиями; "name" в ответе — точно как здесь; если у товара есть "article" — верни его в "article" позиции):\n' + JSON.stringify(list);
 }
 
 // deno-lint-ignore no-explicit-any
@@ -165,6 +170,7 @@ function normItems(items: any): any[] {
       confidence_score: typeof (it && it.confidence_score) === "number" ? it.confidence_score : null,
       corrected: !!(it && it.corrected),
       in_catalog: it && it.in_catalog === false ? false : true,
+      article: it && it.article ? String(it.article) : null,
       note: it && it.note ? String(it.note) : "",
     };
   }).filter((x) => x.name.trim() !== "");
@@ -242,16 +248,16 @@ async function tgDocument(chatId: number, filename: string, blob: Blob, caption:
 // deno-lint-ignore no-explicit-any
 function buildXlsx(items: any[]): Uint8Array {
   // deno-lint-ignore no-explicit-any
-  const rows: any[][] = [["№", "Наименование", "Количество", "Ед.изм.", "Цена", "Сумма"]];
+  const rows: any[][] = [["№", "Код", "Наименование", "Количество", "Ед.изм.", "Цена", "Сумма"]];
   let total = 0;
   items.forEach((it, i) => {
     const sum = it.qty != null && it.price != null ? it.qty * it.price : "";
     if (typeof sum === "number") total += sum;
-    rows.push([i + 1, it.name || "", it.qty == null ? "" : it.qty, it.unit || "", it.price == null ? "" : it.price, sum]);
+    rows.push([i + 1, it.article || "", it.name || "", it.qty == null ? "" : it.qty, it.unit || "", it.price == null ? "" : it.price, sum]);
   });
-  rows.push(["", "Итого", "", "", "", total]);
+  rows.push(["", "", "Итого", "", "", "", total]);
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws["!cols"] = [{ wch: 5 }, { wch: 42 }, { wch: 12 }, { wch: 9 }, { wch: 12 }, { wch: 14 }];
+  ws["!cols"] = [{ wch: 5 }, { wch: 10 }, { wch: 38 }, { wch: 12 }, { wch: 9 }, { wch: 12 }, { wch: 14 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Заказ");
   return new Uint8Array(XLSX.write(wb, { bookType: "xlsx", type: "array" }));
@@ -277,15 +283,15 @@ function csvCell(v: unknown): string {
 
 // deno-lint-ignore no-explicit-any
 function buildCsv(items: any[]): string {
-  const rows: string[][] = [["№", "Наименование", "Количество", "Ед.изм.", "Цена", "Сумма"]];
+  const rows: string[][] = [["№", "Код", "Наименование", "Количество", "Ед.изм.", "Цена", "Сумма"]];
   let total = 0;
   items.forEach((it, i) => {
     const sum = it.qty != null && it.price != null ? it.qty * it.price : "";
     if (typeof sum === "number") total += sum;
-    rows.push([String(i + 1), it.name || "", it.qty == null ? "" : String(it.qty),
+    rows.push([String(i + 1), it.article || "", it.name || "", it.qty == null ? "" : String(it.qty),
       it.unit || "", it.price == null ? "" : String(it.price), sum === "" ? "" : String(sum)]);
   });
-  rows.push(["", "Итого", "", "", "", String(total)]);
+  rows.push(["", "", "Итого", "", "", "", String(total)]);
   return rows.map((r) => r.map(csvCell).join(";")).join("\r\n");
 }
 
@@ -324,9 +330,15 @@ async function processOrderText(chatId: number, link: any, rawText: string) {
   const norm = normalizeTranscript(rawText);
   const supplier = link.user_id;
   // Каталог товаров поставщика — для привязки названий моделью и подстановки цен.
-  const { data: products } = await svc().from("products").select("name, unit, price").eq("user_id", supplier);
+  const { data: products } = await svc().from("products").select("name, unit, price, article").eq("user_id", supplier);
   // deno-lint-ignore no-explicit-any
-  const parsed = await parseOrder(norm.text, (products ?? []).map((p: any) => ({ name: p.name, unit: p.unit })));
+  const parsed = await parseOrder(norm.text, (products ?? []).map((p: any) => {
+    // deno-lint-ignore no-explicit-any
+    const e: any = { name: p.name };
+    if (p.unit) e.unit = p.unit;
+    if (p.article) e.article = p.article;
+    return e;
+  }));
   let items = normItems(parsed.items);
 
   let chosenName = parsed.client_name ? String(parsed.client_name) : "";
@@ -381,7 +393,7 @@ async function processOrderText(chatId: number, link: any, rawText: string) {
   // 3. Цены из каталога для позиций без цены (каталог уже загружен выше).
   if (products && products.length) {
     items.forEach((it) => {
-      if (it.price == null) { const p = matchProduct(it.name, products); if (p && p.price != null) it.price = Number(p.price); }
+      if (it.price == null) { const p = matchProduct(it.name, products, it.article ?? undefined); if (p && p.price != null) it.price = Number(p.price); }
     });
   }
 
