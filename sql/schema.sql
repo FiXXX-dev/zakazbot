@@ -29,8 +29,12 @@ create table if not exists public.products (
   created_at timestamptz not null default now(),
   name       text not null,
   unit       text,
-  price      numeric
+  price      numeric,
+  article    text
 );
+alter table public.products add column if not exists article text;
+create unique index if not exists products_article_user_idx
+  on public.products (user_id, article) where article is not null;
 
 -- Элемент items / standard_order (jsonb):
 -- { "name": "Салфетки", "qty": 10, "unit": "уп", "price": 12000,

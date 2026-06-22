@@ -31,6 +31,7 @@ const SYSTEM_PROMPT = `Ты — система распознавания зак
       "confidence_score": 0-100,
       "corrected": true/false,
       "in_catalog": true/false,
+      "article": "код товара если передан в каталоге",
       "note": "пометка если что-то неясно"
     }
   ]
@@ -51,7 +52,8 @@ const SYSTEM_PROMPT = `Ты — система распознавания зак
   • поле "name" пиши ТОЧНО как в каталоге (буква в букву), даже если клиент сказал на другом языке, сократил или ошибся; один товар на разных языках («стакан», «stakan», «cup», «杯子») → одно и то же каталожное название;
   • уверенно сопоставил — "in_catalog": true; в каталоге нет подходящего товара — НЕ выдумывай каталожное имя и НЕ выбрасывай позицию: оставь название как сказал клиент, "in_catalog": false, "confidence":"low", note "нет в каталоге";
   • соответствие неоднозначно (несколько похожих) — выбери наиболее вероятный, "in_catalog": true, "confidence":"low";
-  • единицу для сопоставленного товара бери из каталога, если она там указана.
+  • единицу для сопоставленного товара бери из каталога, если она там указана;
+  • если в каталоге у товара есть поле "article" — верни его точно в поле "article" позиции.
 Если каталог НЕ передан — ставь "in_catalog": true для всех распознанных позиций и работай как обычно.`;
 
 const OPENAI_API = "https://api.openai.com/v1";
@@ -67,10 +69,13 @@ function catalogMessage(catalog: any): string | null {
     const c = catalog[i];
     const name = c && c.name ? String(c.name).trim() : "";
     if (!name) continue;
-    list.push(c && c.unit ? { name, unit: String(c.unit) } : { name });
+    const entry: Record<string, string> = { name };
+    if (c && c.unit) entry.unit = String(c.unit);
+    if (c && c.article) entry.article = String(c.article);
+    list.push(entry);
   }
   if (!list.length) return null;
-  return 'КАТАЛОГ ТОВАРОВ (сопоставляй строго с этими названиями; "name" в ответе — точно как здесь, если товар есть в каталоге):\n' + JSON.stringify(list);
+  return 'КАТАЛОГ ТОВАРОВ (сопоставляй строго с этими названиями; "name" в ответе — точно как здесь; если у товара есть "article" — верни его в "article" позиции):\n' + JSON.stringify(list);
 }
 
 const corsHeaders = {
